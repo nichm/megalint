@@ -1,7 +1,7 @@
 {
   "name": "agentlinter",
   "version": "0.8.2",
-  "description": "ESLint for AI Agents — Score, diagnose, and auto-fix your CLAUDE.md and agent workspace files",
+  "description": "ESLint for AI Agents \u2014 Score, diagnose, and auto-fix your CLAUDE.md and agent workspace files",
   "bin": {
     "agentlinter": "dist/bin.js"
   },
@@ -19,9 +19,9 @@
   "author": "Seojoon Kim",
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^18.0.0",
-    "tsup": "^8.0.0",
-    "typescript": "^5.0.0"
+    "@types/node": "^24.13.5",
+    "tsup": "^8.5.1",
+    "typescript": "^7.0.2"
   },
   "scripts": {
     "build": "tsup",

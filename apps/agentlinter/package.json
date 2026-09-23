@@ -1,28 +1,28 @@
 {
   "name": "agentlinter",
   "version": "0.8.2",
-  "description": "ESLint for AI Agents — Score, diagnose, and auto-fix your CLAUDE.md and agent workspace files",
+  "description": "ESLint for AI Agents \u2014 Score, diagnose, and auto-fix your CLAUDE.md and agent workspace files",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.94.1",
-    "@tailwindcss/postcss": "^4.0.0",
-    "framer-motion": "^12.0.0",
-    "lucide-react": "^0.474.0",
+    "@supabase/supabase-js": "^2.116.0",
+    "@tailwindcss/postcss": "^4.3.3",
+    "framer-motion": "^13.3.0",
+    "lucide-react": "^1.46.0",
     "nanoid": "^5.1.16",
     "next": "^16.3.6",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "tailwindcss": "^4.0.0"
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "@types/react": "^19.0.0",
-    "typescript": "^5.7.0"
+    "@types/node": "^24.13.5",
+    "@types/react": "^19.3.0",
+    "typescript": "^7.0.2"
   }
 }
