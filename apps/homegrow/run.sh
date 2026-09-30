@@ -27,10 +27,12 @@ LIST_RULES=false
 
 while [[ "${1:-}" == --* ]]; do
   case "$1" in
-    --mode)          MODE="$2"; shift 2 ;;
-    --disable-rule)  DISABLED_RULES="$2"; shift 2 ;;
-    --list-rules)    LIST_RULES=true; shift ;;
-    *)               break ;;
+    --mode)           MODE="$2"; shift 2 ;;
+    --mode=*)         MODE="${1#*=}"; shift ;;
+    --disable-rule)   DISABLED_RULES="$2"; shift 2 ;;
+    --disable-rule=*) DISABLED_RULES="${1#*=}"; shift ;;
+    --list-rules)     LIST_RULES=true; shift ;;
+    *)                break ;;
   esac
 done
 
@@ -84,6 +86,14 @@ fi
 AGENTS_DIR="$1"; shift
 SHARED_DIR="${1:-}"
 [[ -n "$SHARED_DIR" && -d "$SHARED_DIR" ]] && shift || SHARED_DIR=""
+
+# Filter out empty strings from remaining args (empty SHARED_DIR passthrough)
+_RAW_ARGS=("$@")
+_FILTERED_ARGS=()
+for _arg in "${_RAW_ARGS[@]}"; do
+  [[ -n "$_arg" ]] && _FILTERED_ARGS+=("$_arg")
+done
+set -- "${_FILTERED_ARGS[@]+"${_FILTERED_ARGS[@]}"}"
 
 if [[ $# -gt 0 ]]; then
   AGENTS=("$@")

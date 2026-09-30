@@ -271,29 +271,37 @@ fi
 if [[ "$LIST_RULES_FLAG" == "true" ]]; then
   effective_mode="${MODE_FLAG:-auto}"
   [[ "$effective_mode" == "auto" ]] && effective_mode="skills"
-  bash "$SCRIPT_DIR/apps/homegrow/run.sh" --mode "$effective_mode" --list-rules . 2>/dev/null || \
-    bash "$SCRIPT_DIR/apps/homegrow/run.sh" --mode "$effective_mode" --list-rules
+  bash "$SCRIPT_DIR/apps/homegrow/run.sh" --mode "$effective_mode" --list-rules .
   exit 0
 fi
 
 # ─── --preset: resolve to disabled rules ──────────────────────────────────────
 
 if [[ -n "$PRESET_FLAG" ]]; then
+  PRESET_DISABLED=""
   case "$PRESET_FLAG" in
     strict)
       ;; # all rules enabled
     balanced)
       # Disable INFO-only advisory rules
-      DISABLE_RULES_FLAG="skill/scope-boundaries,skill/examples,skill/output-format,skill/error-handling,skill/restrictions,skill/tool-boundaries,prompt/identity,prompt/output-format,prompt/scope,prompt/examples,prompt/constraints"
+      PRESET_DISABLED="skill/scope-boundaries,skill/examples,skill/output-format,skill/error-handling,skill/restrictions,skill/tool-boundaries,prompt/identity,prompt/output-format,prompt/scope,prompt/examples,prompt/constraints"
       ;;
     minimal)
       # Only ERROR-severity rules
-      DISABLE_RULES_FLAG="skill/description,skill/when-to-use,skill/structure,skill/actionable,skill/injection,skill/file-count,skill/scope-boundaries,skill/examples,skill/output-format,skill/error-handling,skill/restrictions,skill/tool-boundaries,skill/idempotent,prompt/identity,prompt/output-format,prompt/injection,prompt/scope,prompt/examples,prompt/constraints"
+      PRESET_DISABLED="skill/description,skill/when-to-use,skill/structure,skill/actionable,skill/injection,skill/file-count,skill/scope-boundaries,skill/examples,skill/output-format,skill/error-handling,skill/restrictions,skill/tool-boundaries,skill/idempotent,prompt/identity,prompt/output-format,prompt/injection,prompt/scope,prompt/examples,prompt/constraints"
       ;;
     *)
       echo "$(red "Unknown preset: $PRESET_FLAG (use strict, balanced, or minimal)")"; exit 1
       ;;
   esac
+  # Merge preset disabled rules with any explicit --disable-rule (union)
+  if [[ -n "$PRESET_DISABLED" ]]; then
+    if [[ -n "$DISABLE_RULES_FLAG" ]]; then
+      DISABLE_RULES_FLAG="$DISABLE_RULES_FLAG,$PRESET_DISABLED"
+    else
+      DISABLE_RULES_FLAG="$PRESET_DISABLED"
+    fi
+  fi
 fi
 
 # ─── Dependency checks (after help/list-rules, so those work without deps) ───

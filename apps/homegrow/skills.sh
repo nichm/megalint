@@ -128,10 +128,11 @@ check_skill_actionable() {
   for skill in "${AGENTS[@]}"; do
     local f="$AGENTS_DIR/$skill/SKILL.md"
     [[ ! -f "$f" ]] && continue
-    local has_steps has_bullets has_code
+    local has_steps has_bullets raw_fences has_code
     has_steps=$(rg -c '^\d+\.\s' "$f" 2>/dev/null || echo 0)
     has_bullets=$(rg -c '^[-*]\s' "$f" 2>/dev/null || echo 0)
-    has_code=$(rg -c '^```' "$f" 2>/dev/null || echo 0)
+    raw_fences=$(rg -c '^```' "$f" 2>/dev/null || echo 0)
+    has_code=$(( raw_fences / 2 ))
     local total=$((has_steps + has_bullets + has_code))
     if [[ "$total" -ge 3 ]]; then
       emit OK "$skill" "[skill/actionable] actionable content ($has_steps steps, $has_bullets bullets, $has_code code blocks)"
@@ -147,7 +148,7 @@ check_skill_actionable() {
 
 check_skill_injection() {
   rule_enabled "skill/injection" || return 0
-  local injection_patterns='ignore (all )?previous|disregard (all )?instructions|you are now|new instructions|forget (all|everything|your)|override (your|all)|system prompt|jailbreak'
+  local injection_patterns='ignore (all )?previous|disregard (all )?instructions|you are now|new instructions|forget (all|everything|your)|override (your|all)|reveal.*system prompt|leak.*system prompt|print.*system prompt|jailbreak'
   for skill in "${AGENTS[@]}"; do
     local skill_dir="$AGENTS_DIR/$skill"
     [[ ! -d "$skill_dir" ]] && continue
@@ -195,7 +196,7 @@ check_skill_scope_boundaries() {
   for skill in "${AGENTS[@]}"; do
     local f="$AGENTS_DIR/$skill/SKILL.md"
     [[ ! -f "$f" ]] && continue
-    if rg -qi '(do not|don.t|never|must not|should not|avoid|skip|out of scope|not responsible|not for|boundaries|limitations|except)' "$f" 2>/dev/null; then
+    if rg -qi '(do not .{0,30}(use|run|call|change|modify|delete|edit)|don.t .{0,30}(use|run|call|change|modify|delete)|never .{0,20}(use|run|call|change|modify|delete|apply)|must not|should not|out of scope|not responsible|not (for|designed|intended) )' "$f" 2>/dev/null; then
       emit OK "$skill" "[skill/scope-boundaries] has scope boundaries"
     else
       emit INFO "$skill" "[skill/scope-boundaries] no scope boundaries found — consider defining what the skill should NOT do. 5.4% of top prompt tokens are safety/boundary rules (arxiv 2609.31575)"
@@ -212,8 +213,9 @@ check_skill_examples() {
   for skill in "${AGENTS[@]}"; do
     local f="$AGENTS_DIR/$skill/SKILL.md"
     [[ ! -f "$f" ]] && continue
-    local has_code_blocks has_example_keyword
-    has_code_blocks=$(rg -c '^```' "$f" 2>/dev/null || echo 0)
+    local raw_fences has_code_blocks has_example_keyword
+    raw_fences=$(rg -c '^```' "$f" 2>/dev/null || echo 0)
+    has_code_blocks=$(( raw_fences / 2 ))
     has_example_keyword=$(rg -ci '(example|e\.g\.|for instance|sample|such as|like this|here.s|demonstration)' "$f" 2>/dev/null || echo 0)
     if [[ "$has_code_blocks" -ge 1 || "$has_example_keyword" -ge 2 ]]; then
       emit OK "$skill" "[skill/examples] has examples ($has_code_blocks code blocks, $has_example_keyword example references)"
@@ -291,7 +293,7 @@ check_skill_restrictions() {
     local f="$AGENTS_DIR/$skill/SKILL.md"
     [[ ! -f "$f" ]] && continue
     local restriction_count
-    restriction_count=$(rg -ci '\b(NEVER|MUST NOT|DO NOT|IMPORTANT|CRITICAL|REQUIRED|STRICTLY|ALWAYS|FORBIDDEN|PROHIBITED)\b' "$f" 2>/dev/null || echo 0)
+    restriction_count=$(rg -c '\b(NEVER|MUST NOT|DO NOT|IMPORTANT|CRITICAL|REQUIRED|STRICTLY|ALWAYS|FORBIDDEN|PROHIBITED)\b' "$f" 2>/dev/null || echo 0)
     if [[ "$restriction_count" -ge 3 ]]; then
       emit OK "$skill" "[skill/restrictions] $restriction_count emphatic markers (NEVER/MUST NOT/etc.)"
     elif [[ "$restriction_count" -ge 1 ]]; then

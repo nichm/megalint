@@ -100,7 +100,7 @@ def _header(meta: dict) -> None:
     print()
 
 
-def _section_agentlinter(data: dict, agents: list) -> None:
+def _section_agentlinter(data: dict, agents: list, quiet: bool = False) -> None:
     _section("Tool 1: AgentLinter")
     al = data.get("agentlinter") or {}
     scores = al.get("scores") or {}
@@ -170,7 +170,7 @@ def _section_agentlinter(data: dict, agents: list) -> None:
     print()
 
 
-def _section_promptlint(data: dict, agents: list) -> None:
+def _section_promptlint(data: dict, agents: list, quiet: bool = False) -> None:
     _section("Tool 2: PromptLint")
     pl = data.get("promptlint") or {}
     per_agent = pl.get("per_agent") or {}
@@ -489,8 +489,8 @@ def display(summary_path: str, log_path: str | None = None) -> int:
     mode = meta.get("mode", "agents")
     quiet = meta.get("quiet", False)
     _header(meta)
-    _section_agentlinter(data, agents)
-    _section_promptlint(data, agents)
+    _section_agentlinter(data, agents, quiet=quiet)
+    _section_promptlint(data, agents, quiet=quiet)
     _section_homegrow(data, mode, quiet=quiet)
     _section_budget(data, agents)
     _section_hardener(data, agents, meta)
