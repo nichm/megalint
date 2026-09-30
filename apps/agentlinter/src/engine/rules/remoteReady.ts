@@ -1,29 +1,42 @@
 /* ─── Remote-Ready Score Rules (5%) ─── */
 /* Checks if the workspace is ready for remote/headless agent execution */
 
-import { Rule, Diagnostic } from "../types";
+import { Rule, Diagnostic, FileInfo } from "../types";
+
+/** Collect all non-memory/non-compound file content into a single string */
+function collectContent(files: FileInfo[]): string {
+  return files
+    .filter(
+      (f) => !f.name.startsWith("memory/") && !f.name.startsWith("compound/"),
+    )
+    .map((f) => f.content)
+    .join("\n");
+}
+
+/** Find the main agent file (CLAUDE.md or AGENTS.md) */
+function findMainFile(files: FileInfo[]): FileInfo | undefined {
+  return files.find((f) => f.name === "CLAUDE.md" || f.name === "AGENTS.md");
+}
 
 export const remoteReadyRules: Rule[] = [
   {
     id: "remote-ready/workspace-path-specified",
     category: "remoteReady",
     severity: "warning",
-    description: "Workspace path should be explicitly documented for remote execution",
+    description:
+      "Workspace path should be explicitly documented for remote execution",
     check(files) {
-      const mainFile = files.find(
-        (f) => f.name === "CLAUDE.md" || f.name === "AGENTS.md"
-      );
+      const mainFile = findMainFile(files);
       if (!mainFile) return [];
 
-      const allContent = files
-        .filter((f) => !f.name.startsWith("memory/"))
-        .map((f) => f.content)
-        .join("\n");
+      const allContent = collectContent(files);
 
       const hasWorkspacePath =
         /workspace.*[:=]\s*[`'"]?\/[^\s`'"]+/i.test(allContent) ||
         /repo.*[:=]\s*[`'"]?\/[^\s`'"]+/i.test(allContent) ||
-        /working\s+dir(?:ectory)?.*[:=]\s*[`'"]?\/[^\s`'"]+/i.test(allContent) ||
+        /working\s+dir(?:ectory)?.*[:=]\s*[`'"]?\/[^\s`'"]+/i.test(
+          allContent,
+        ) ||
         /cwd.*[:=]\s*[`'"]?\/[^\s`'"]+/i.test(allContent) ||
         /\bworkdir\b.*\/[^\s]+/i.test(allContent) ||
         /(?:repo|workspace|workdir|cwd)\s*=\s*\/[^\s]+/i.test(allContent);
@@ -51,16 +64,11 @@ export const remoteReadyRules: Rule[] = [
     severity: "warning",
     description: "Required environment variables should be documented",
     check(files) {
-      const mainFile = files.find(
-        (f) => f.name === "CLAUDE.md" || f.name === "AGENTS.md"
-      );
+      const mainFile = findMainFile(files);
       const toolsFile = files.find((f) => f.name === "TOOLS.md");
       if (!mainFile && !toolsFile) return [];
 
-      const allContent = files
-        .filter((f) => !f.name.startsWith("memory/") && !f.name.startsWith("compound/"))
-        .map((f) => f.content)
-        .join("\n");
+      const allContent = collectContent(files);
 
       const hasEnvVarUsage =
         /\$\{?[A-Z][A-Z0-9_]{2,}\}?/.test(allContent) ||
@@ -95,22 +103,20 @@ export const remoteReadyRules: Rule[] = [
     id: "remote-ready/model-settings-specified",
     category: "remoteReady",
     severity: "info",
-    description: "Model settings should be explicitly configured for reproducible remote execution",
+    description:
+      "Model settings should be explicitly configured for reproducible remote execution",
     check(files) {
-      const mainFile = files.find(
-        (f) => f.name === "CLAUDE.md" || f.name === "AGENTS.md"
-      );
+      const mainFile = findMainFile(files);
       const toolsFile = files.find((f) => f.name === "TOOLS.md");
       if (!mainFile && !toolsFile) return [];
 
-      const allContent = files
-        .filter((f) => !f.name.startsWith("memory/") && !f.name.startsWith("compound/"))
-        .map((f) => f.content)
-        .join("\n");
+      const allContent = collectContent(files);
 
       const hasModelConfig =
         /default[_-]?model\s*[:=]/i.test(allContent) ||
-        /model\s*[:=]\s*["']?(?:anthropic|openai|google|xai|gpt|claude|gemini|grok)/i.test(allContent) ||
+        /model\s*[:=]\s*["']?(?:anthropic|openai|google|xai|gpt|claude|gemini|grok)/i.test(
+          allContent,
+        ) ||
         /\bmodel\s*=\s*[a-z]+\/[a-z-]+/i.test(allContent) ||
         /claude-(?:opus|sonnet|haiku)/i.test(allContent) ||
         /gpt-4/i.test(allContent) ||

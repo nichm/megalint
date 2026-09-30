@@ -2,12 +2,14 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://agentlinter.com"),
   title: "AgentLinter — Linter for CLAUDE.md & AI Agents",
   description:
     "Optimized for Anthropic's CLAUDE.md. Score, diagnose, and auto-fix your agent workspace files.",
   openGraph: {
     title: "AgentLinter — Linter for CLAUDE.md & AI Agents",
-    description: "Optimized for Anthropic's CLAUDE.md. Score, diagnose, and auto-fix your agent workspace files.",
+    description:
+      "Optimized for Anthropic's CLAUDE.md. Score, diagnose, and auto-fix your agent workspace files.",
     url: "https://agentlinter.com",
     siteName: "AgentLinter",
     type: "website",
@@ -15,7 +17,8 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "AgentLinter — Linter for CLAUDE.md & AI Agents",
-    description: "Optimized for Anthropic's CLAUDE.md. Score, diagnose, and auto-fix your agent workspace files.",
+    description:
+      "Optimized for Anthropic's CLAUDE.md. Score, diagnose, and auto-fix your agent workspace files.",
   },
 };
 

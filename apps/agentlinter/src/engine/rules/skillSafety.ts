@@ -1,15 +1,47 @@
 /* ─── Skill Safety Rules (10%) ─── */
 /* Pre-install security checks for agent skills */
 
-import { Rule, Diagnostic } from "../types";
+import { Rule, Diagnostic, FileInfo } from "../types";
+
+/** Filter files to only SKILL.md files inside skills/ directories */
+function getSkillMdFiles(files: FileInfo[]): FileInfo[] {
+  return files.filter(
+    (f) => f.name.includes("skills/") && f.name.endsWith("SKILL.md"),
+  );
+}
+
+/** Filter files to all files inside skills/ directories */
+function getAllSkillFiles(files: FileInfo[]): FileInfo[] {
+  return files.filter((f) => f.name.includes("skills/"));
+}
 
 /** Patterns that indicate potentially dangerous skill behavior */
 const DANGEROUS_EXEC_PATTERNS = [
-  { pattern: /rm\s+-rf\s+[\/~]/, name: "Recursive delete on root/home", severity: "error" as const },
-  { pattern: /curl\s+.*\|\s*(?:bash|sh|zsh)/, name: "Pipe curl to shell", severity: "error" as const },
-  { pattern: /eval\s*\(/, name: "Dynamic eval execution", severity: "warning" as const },
-  { pattern: /wget\s+.*-O\s*-\s*\|\s*(?:bash|sh)/, name: "Pipe wget to shell", severity: "error" as const },
-  { pattern: /chmod\s+777/, name: "World-writable permissions", severity: "warning" as const },
+  {
+    pattern: /rm\s+-rf\s+[\/~]/,
+    name: "Recursive delete on root/home",
+    severity: "error" as const,
+  },
+  {
+    pattern: /curl\s+.*\|\s*(?:bash|sh|zsh)/,
+    name: "Pipe curl to shell",
+    severity: "error" as const,
+  },
+  {
+    pattern: /eval\s*\(/,
+    name: "Dynamic eval execution",
+    severity: "warning" as const,
+  },
+  {
+    pattern: /wget\s+.*-O\s*-\s*\|\s*(?:bash|sh)/,
+    name: "Pipe wget to shell",
+    severity: "error" as const,
+  },
+  {
+    pattern: /chmod\s+777/,
+    name: "World-writable permissions",
+    severity: "warning" as const,
+  },
   { pattern: /sudo\s+/, name: "Sudo usage", severity: "warning" as const },
 ];
 
@@ -20,28 +52,49 @@ const SENSITIVE_PATH_PATTERNS = [
   { pattern: /~\/\.env/, name: "Environment file" },
   { pattern: /\/etc\/passwd/, name: "System password file" },
   { pattern: /\/etc\/shadow/, name: "System shadow file" },
-  { pattern: /~\/\.clawdbot\/clawdbot\.json/, name: "Agent config with tokens" },
+  {
+    pattern: /~\/\.clawdbot\/clawdbot\.json/,
+    name: "Agent config with tokens",
+  },
 ];
 
 const DATA_EXFIL_PATTERNS = [
   { pattern: /curl\s+.*-d\s+.*\$/, name: "curl POST with variable data" },
   { pattern: /curl\s+.*--data.*\$/, name: "curl data with variable" },
   { pattern: /fetch\s*\(.*\+/, name: "Dynamic fetch URL construction" },
-  { pattern: /webhook\.site|requestbin|pipedream/, name: "Known data collection service" },
-  { pattern: /ngrok|localhost\.run|serveo/, name: "Tunnel service (potential exfil)" },
+  {
+    pattern: /webhook\.site|requestbin|pipedream/,
+    name: "Known data collection service",
+  },
+  {
+    pattern: /ngrok|localhost\.run|serveo/,
+    name: "Tunnel service (potential exfil)",
+  },
 ];
 
 /** Security/defense skills document attacks as examples — demote severity for these */
 const SECURITY_SKILL_PATTERNS = [
-  /prompt[- ]?guard/i, /security/i, /injection/i, /defense/i, /detect/i,
-  /shield/i, /protect/i, /hive[- ]?fence/i, /guard/i, /firewall/i,
-  /threat/i, /attack/i, /vulnerability/i, /red[- ]?team/i, /pentest/i,
+  /prompt[- ]?guard/i,
+  /security/i,
+  /injection/i,
+  /defense/i,
+  /detect/i,
+  /shield/i,
+  /protect/i,
+  /hive[- ]?fence/i,
+  /guard/i,
+  /firewall/i,
+  /threat/i,
+  /attack/i,
+  /vulnerability/i,
+  /red[- ]?team/i,
+  /pentest/i,
 ];
 
 /** Check if a file is a security-related skill (documents attack patterns for defensive purposes) */
 function isSecuritySkill(file: { name: string; content: string }): boolean {
   return SECURITY_SKILL_PATTERNS.some(
-    (p) => p.test(file.name) || p.test(file.content.substring(0, 500))
+    (p) => p.test(file.name) || p.test(file.content.substring(0, 500)),
   );
 }
 
@@ -58,9 +111,7 @@ export const skillSafetyRules: Rule[] = [
     description: "SKILL.md name frontmatter must match parent directory name",
     check(files) {
       const diagnostics: Diagnostic[] = [];
-      const skillFiles = files.filter(
-        (f) => f.name.includes("skills/") && f.name.endsWith("SKILL.md")
-      );
+      const skillFiles = getSkillMdFiles(files);
 
       for (const file of skillFiles) {
         if (!file.content.startsWith("---")) continue;
@@ -98,15 +149,15 @@ export const skillSafetyRules: Rule[] = [
     description: "SKILL.md description should explain when to use the skill",
     check(files) {
       const diagnostics: Diagnostic[] = [];
-      const skillFiles = files.filter(
-        (f) => f.name.includes("skills/") && f.name.endsWith("SKILL.md")
-      );
+      const skillFiles = getSkillMdFiles(files);
 
       for (const file of skillFiles) {
         if (!file.content.startsWith("---")) continue;
 
         const frontmatter = file.content.split("---")[1] || "";
-        const descMatch = frontmatter.match(/^description:\s*["']?([^\n"']+)["']?/m);
+        const descMatch = frontmatter.match(
+          /^description:\s*["']?([^\n"']+)["']?/m,
+        );
         if (!descMatch) continue;
 
         const description = descMatch[1].trim();
@@ -120,7 +171,9 @@ export const skillSafetyRules: Rule[] = [
           /invok(?:e|ed)\s+when/i.test(description) ||
           /trigger(?:ed)?\s+when/i.test(description) ||
           /use\s+(?:this|it)\s+to/i.test(description) ||
-          /(?:submit|create|run|build|deploy|scan|lint|test|check|generate|search|fetch)\s+/i.test(description);
+          /(?:submit|create|run|build|deploy|scan|lint|test|check|generate|search|fetch)\s+/i.test(
+            description,
+          );
 
         if (!hasWhenToUse) {
           diagnostics.push({
@@ -147,9 +200,7 @@ export const skillSafetyRules: Rule[] = [
     check(files) {
       const diagnostics: Diagnostic[] = [];
 
-      const skillFiles = files.filter(
-        (f) => f.name.includes("skills/") && f.name.endsWith("SKILL.md")
-      );
+      const skillFiles = getSkillMdFiles(files);
 
       for (const file of skillFiles) {
         if (!file.content.startsWith("---")) {
@@ -158,8 +209,9 @@ export const skillSafetyRules: Rule[] = [
             category: "skillSafety",
             rule: this.id,
             file: file.name,
-            message: "Skill missing YAML frontmatter — description is required for auto-invocation.",
-            fix: "Add frontmatter with description:\n---\nname: skill-name\ndescription: \"When and what this skill does\"\n---",
+            message:
+              "Skill missing YAML frontmatter — description is required for auto-invocation.",
+            fix: 'Add frontmatter with description:\n---\nname: skill-name\ndescription: "When and what this skill does"\n---',
           });
           continue;
         }
@@ -173,8 +225,7 @@ export const skillSafetyRules: Rule[] = [
             file: file.name,
             message:
               "Skill missing 'description' field — Claude cannot determine when to auto-invoke this skill.",
-            fix:
-              "Add description to frontmatter. Be specific about when to use it:\n  description: \"Use when user asks to analyze TypeScript type errors\"",
+            fix: 'Add description to frontmatter. Be specific about when to use it:\n  description: "Use when user asks to analyze TypeScript type errors"',
           });
         }
       }
@@ -193,9 +244,7 @@ export const skillSafetyRules: Rule[] = [
     check(files) {
       const diagnostics: Diagnostic[] = [];
 
-      const skillFiles = files.filter(
-        (f) => f.name.includes("skills/") && f.name.endsWith("SKILL.md")
-      );
+      const skillFiles = getSkillMdFiles(files);
 
       for (const file of skillFiles) {
         // Check if the skill contains side-effect keywords
@@ -216,8 +265,7 @@ export const skillSafetyRules: Rule[] = [
             rule: this.id,
             file: file.name,
             message: `Skill contains side-effect keyword '${match?.[0] ?? ""}' but lacks 'disable-model-invocation: true'. Claude may auto-execute this skill unexpectedly.`,
-            fix:
-              "Add to frontmatter:\n  disable-model-invocation: true\nThis ensures the skill only runs when explicitly invoked by the user.",
+            fix: "Add to frontmatter:\n  disable-model-invocation: true\nThis ensures the skill only runs when explicitly invoked by the user.",
           });
         }
       }
@@ -236,9 +284,7 @@ export const skillSafetyRules: Rule[] = [
     check(files) {
       const diagnostics: Diagnostic[] = [];
 
-      const skillFiles = files.filter(
-        (f) => f.name.includes("skills/") && f.name.endsWith("SKILL.md")
-      );
+      const skillFiles = getSkillMdFiles(files);
 
       for (const file of skillFiles) {
         if (file.lines.length > 500) {
@@ -270,17 +316,15 @@ export const skillSafetyRules: Rule[] = [
     },
   },
 
-
   {
     id: "skill-safety/has-metadata",
     category: "skillSafety",
     severity: "warning",
-    description: "Skills should have proper metadata (name, description, author)",
+    description:
+      "Skills should have proper metadata (name, description, author)",
     check(files) {
       const diagnostics: Diagnostic[] = [];
-      const skillFiles = files.filter(
-        (f) => f.name.includes("skills/") && f.name.endsWith("SKILL.md")
-      );
+      const skillFiles = getSkillMdFiles(files);
 
       for (const file of skillFiles) {
         const hasFrontmatter = file.content.startsWith("---");
@@ -290,7 +334,8 @@ export const skillSafetyRules: Rule[] = [
             category: "skillSafety",
             rule: this.id,
             file: file.name,
-            message: "Skill missing YAML frontmatter (name, description, author).",
+            message:
+              "Skill missing YAML frontmatter (name, description, author).",
             fix: "Add frontmatter: ---\\nname: skill-name\\ndescription: ...\\nauthor: ...\\n---",
           });
           continue;
@@ -303,7 +348,8 @@ export const skillSafetyRules: Rule[] = [
             category: "skillSafety",
             rule: this.id,
             file: file.name,
-            message: "Skill missing author field — unattributed skills are harder to trust.",
+            message:
+              "Skill missing author field — unattributed skills are harder to trust.",
             fix: "Add author field to frontmatter.",
           });
         }
@@ -313,7 +359,8 @@ export const skillSafetyRules: Rule[] = [
             category: "skillSafety",
             rule: this.id,
             file: file.name,
-            message: "Skill missing description — unclear what this skill does.",
+            message:
+              "Skill missing description — unclear what this skill does.",
             fix: "Add a description field to frontmatter.",
           });
         }
@@ -329,7 +376,7 @@ export const skillSafetyRules: Rule[] = [
     description: "Skills should not contain dangerous shell commands",
     check(files) {
       const diagnostics: Diagnostic[] = [];
-      const skillFiles = files.filter((f) => f.name.includes("skills/"));
+      const skillFiles = getAllSkillFiles(files);
 
       for (const file of skillFiles) {
         let inCodeBlock = false;
@@ -340,9 +387,15 @@ export const skillSafetyRules: Rule[] = [
           for (const { pattern, name, severity } of DANGEROUS_EXEC_PATTERNS) {
             if (pattern.test(line)) {
               // Demote if inside code block, documentation line, or install instructions
-              const isDoc = inCodeBlock
-                || /^[\s]*[>$#❌✅|]/.test(line)
-                || /install|prerequisite|setup|dependency/i.test(file.lines[Math.max(0, i - 3)]?.concat(file.lines[Math.max(0, i - 2)] || "", file.lines[Math.max(0, i - 1)] || "") || "");
+              const isDoc =
+                inCodeBlock ||
+                /^[\s]*[>$#❌✅|]/.test(line) ||
+                /install|prerequisite|setup|dependency/i.test(
+                  file.lines[Math.max(0, i - 3)]?.concat(
+                    file.lines[Math.max(0, i - 2)] || "",
+                    file.lines[Math.max(0, i - 1)] || "",
+                  ) || "",
+                );
 
               diagnostics.push({
                 severity: isDoc ? "info" : severity,
@@ -368,7 +421,7 @@ export const skillSafetyRules: Rule[] = [
     description: "Skills should not access sensitive system paths",
     check(files) {
       const diagnostics: Diagnostic[] = [];
-      const skillFiles = files.filter((f) => f.name.includes("skills/"));
+      const skillFiles = getAllSkillFiles(files);
       for (const file of skillFiles) {
         const isSecurity = isSecuritySkill(file);
         for (let i = 0; i < file.lines.length; i++) {
@@ -401,7 +454,7 @@ export const skillSafetyRules: Rule[] = [
     description: "Skills should not exfiltrate data to external services",
     check(files) {
       const diagnostics: Diagnostic[] = [];
-      const skillFiles = files.filter((f) => f.name.includes("skills/"));
+      const skillFiles = getAllSkillFiles(files);
 
       for (const file of skillFiles) {
         const isSecurity = isSecuritySkill(file);
@@ -411,7 +464,8 @@ export const skillSafetyRules: Rule[] = [
           if (line.trim().startsWith("```")) inCodeBlock = !inCodeBlock;
           for (const { pattern, name } of DATA_EXFIL_PATTERNS) {
             if (pattern.test(line)) {
-              const isDoc = isSecurity || inCodeBlock || /^[\s]*[>❌✅|$#]/.test(line);
+              const isDoc =
+                isSecurity || inCodeBlock || /^[\s]*[>❌✅|$#]/.test(line);
               diagnostics.push({
                 severity: isDoc ? "info" : "error",
                 category: "skillSafety",
@@ -436,9 +490,7 @@ export const skillSafetyRules: Rule[] = [
     description: "Skills requesting broad permissions should be flagged",
     check(files) {
       const diagnostics: Diagnostic[] = [];
-      const skillFiles = files.filter(
-        (f) => f.name.includes("skills/") && f.name.endsWith("SKILL.md")
-      );
+      const skillFiles = getSkillMdFiles(files);
 
       const broadPermissionPatterns = [
         /(?:grant|give|require|need)s?\s+(?:full|unrestricted|unlimited)\s+(?:access|permission|control)/i,
@@ -476,7 +528,7 @@ export const skillSafetyRules: Rule[] = [
     description: "Skills should not contain prompt injection vectors",
     check(files) {
       const diagnostics: Diagnostic[] = [];
-      const skillFiles = files.filter((f) => f.name.includes("skills/"));
+      const skillFiles = getAllSkillFiles(files);
 
       const injectionPatterns = [
         /ignore\s+(?:all\s+)?(?:previous|above|prior)\s+(?:instructions?|rules?|constraints?)/i,
@@ -485,7 +537,8 @@ export const skillSafetyRules: Rule[] = [
         /override\s+(?:all|your|system)\s+(?:rules|instructions|constraints)/i,
       ];
       // "you are now" is only suspicious if followed by jailbreak-style role changes, not normal role descriptions
-      const jailbreakRolePattern = /you\s+are\s+now\s+(?:a|an|in)\s+(?:new|different|unrestricted|evil|DAN|jailbr)/i;
+      const jailbreakRolePattern =
+        /you\s+are\s+now\s+(?:a|an|in)\s+(?:new|different|unrestricted|evil|DAN|jailbr)/i;
 
       for (const file of skillFiles) {
         const isSecurity = isSecuritySkill(file);
@@ -501,10 +554,11 @@ export const skillSafetyRules: Rule[] = [
           for (const pattern of allPatterns) {
             if (pattern.test(line)) {
               // Demote severity for security docs, code blocks, or example lines
-              const isExample = inCodeBlock
-                || /^[\s]*[❌✅⚠️|>$#]/.test(line)
-                || /example|detect|pattern|test/i.test(line)
-                || isSecurity;
+              const isExample =
+                inCodeBlock ||
+                /^[\s]*[❌✅⚠️|>$#]/.test(line) ||
+                /example|detect|pattern|test/i.test(line) ||
+                isSecurity;
 
               diagnostics.push({
                 severity: isExample ? "info" : "error",

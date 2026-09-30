@@ -6,9 +6,14 @@ import { Rule, Diagnostic } from "../types";
 /**
  * Try to parse JSON config from a FileInfo that represents clawdbot.json / openclaw.json
  */
-function getConfigJSON(files: { name: string; content: string }[]): { json: Record<string, unknown>; fileName: string } | null {
+function getConfigJSON(
+  files: { name: string; content: string }[],
+): { json: Record<string, unknown>; fileName: string } | null {
   const configFile = files.find(
-    (f) => f.name === "clawdbot.json" || f.name === "openclaw.json" || f.name === ".clawdbot/clawdbot.json"
+    (f) =>
+      f.name === "clawdbot.json" ||
+      f.name === "openclaw.json" ||
+      f.name === ".clawdbot/clawdbot.json",
   );
   if (!configFile) return null;
   try {
@@ -28,6 +33,22 @@ function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
   return current;
 }
 
+/** Iterate over channel configs, yielding (name, channelConfig) pairs */
+function* iterChannels(
+  files: { name: string; content: string }[],
+): Generator<[string, Record<string, unknown>, string]> {
+  const config = getConfigJSON(files);
+  if (!config) return;
+  const channels = getNestedValue(config.json, "channels") as
+    | Record<string, unknown>
+    | undefined;
+  if (!channels || typeof channels !== "object") return;
+  for (const [name, channelConfig] of Object.entries(channels)) {
+    if (!channelConfig || typeof channelConfig !== "object") continue;
+    yield [name, channelConfig as Record<string, unknown>, config.fileName];
+  }
+}
+
 export const runtimeRules: Rule[] = [
   {
     id: "runtime/config-exists",
@@ -36,17 +57,23 @@ export const runtimeRules: Rule[] = [
     description: "Agent runtime config file should exist for full analysis",
     check(files) {
       const configFile = files.find(
-        (f) => f.name === "clawdbot.json" || f.name === "openclaw.json" || f.name === ".clawdbot/clawdbot.json"
+        (f) =>
+          f.name === "clawdbot.json" ||
+          f.name === "openclaw.json" ||
+          f.name === ".clawdbot/clawdbot.json",
       );
       if (!configFile) {
-        return [{
-          severity: "info",
-          category: "runtime",
-          rule: this.id,
-          file: "(workspace)",
-          message: "No runtime config (clawdbot.json / openclaw.json) found. Runtime checks skipped.",
-          fix: "If using Clawdbot/OpenClaw, ensure clawdbot.json exists in ~/.clawdbot/ or project root.",
-        }];
+        return [
+          {
+            severity: "info",
+            category: "runtime",
+            rule: this.id,
+            file: "(workspace)",
+            message:
+              "No runtime config (clawdbot.json / openclaw.json) found. Runtime checks skipped.",
+            fix: "If using Clawdbot/OpenClaw, ensure clawdbot.json exists in ~/.clawdbot/ or project root.",
+          },
+        ];
       }
       return [];
     },
@@ -60,16 +87,23 @@ export const runtimeRules: Rule[] = [
     check(files) {
       const config = getConfigJSON(files);
       if (!config) return [];
-      const bind = getNestedValue(config.json, "gateway.bind") as string | undefined;
-      if (bind && !["loopback", "localhost", "127.0.0.1", "::1"].includes(bind)) {
-        return [{
-          severity: "error",
-          category: "runtime",
-          rule: this.id,
-          file: config.fileName,
-          message: `Gateway bind is "${bind}" — exposes agent to the network. Must be loopback.`,
-          fix: 'Set gateway.bind to "loopback" or remove the key (default is loopback).',
-        }];
+      const bind = getNestedValue(config.json, "gateway.bind") as
+        | string
+        | undefined;
+      if (
+        bind &&
+        !["loopback", "localhost", "127.0.0.1", "::1"].includes(bind)
+      ) {
+        return [
+          {
+            severity: "error",
+            category: "runtime",
+            rule: this.id,
+            file: config.fileName,
+            message: `Gateway bind is "${bind}" — exposes agent to the network. Must be loopback.`,
+            fix: 'Set gateway.bind to "loopback" or remove the key (default is loopback).',
+          },
+        ];
       }
       return [];
     },
@@ -83,16 +117,20 @@ export const runtimeRules: Rule[] = [
     check(files) {
       const config = getConfigJSON(files);
       if (!config) return [];
-      const authMode = getNestedValue(config.json, "gateway.auth.mode") as string | undefined;
+      const authMode = getNestedValue(config.json, "gateway.auth.mode") as
+        | string
+        | undefined;
       if (authMode && ["off", "none"].includes(authMode)) {
-        return [{
-          severity: "error",
-          category: "runtime",
-          rule: this.id,
-          file: config.fileName,
-          message: `Auth mode is "${authMode}" — anyone who can reach the gateway can control your agent.`,
-          fix: 'Set gateway.auth.mode to "token" and configure a strong token.',
-        }];
+        return [
+          {
+            severity: "error",
+            category: "runtime",
+            rule: this.id,
+            file: config.fileName,
+            message: `Auth mode is "${authMode}" — anyone who can reach the gateway can control your agent.`,
+            fix: 'Set gateway.auth.mode to "token" and configure a strong token.',
+          },
+        ];
       }
       return [];
     },
@@ -106,30 +144,38 @@ export const runtimeRules: Rule[] = [
     check(files) {
       const config = getConfigJSON(files);
       if (!config) return [];
-      const authMode = getNestedValue(config.json, "gateway.auth.mode") as string | undefined;
+      const authMode = getNestedValue(config.json, "gateway.auth.mode") as
+        | string
+        | undefined;
       if (authMode === "password") return []; // Don't judge password length
 
-      const token = getNestedValue(config.json, "gateway.auth.token") as string | undefined;
+      const token = getNestedValue(config.json, "gateway.auth.token") as
+        | string
+        | undefined;
       if (token) {
         if (token.length < 16) {
-          return [{
-            severity: "error",
-            category: "runtime",
-            rule: this.id,
-            file: config.fileName,
-            message: `Auth token is only ${token.length} characters — vulnerable to brute-force.`,
-            fix: "Use a token of at least 32 characters. Generate one with: openssl rand -hex 32",
-          }];
+          return [
+            {
+              severity: "error",
+              category: "runtime",
+              rule: this.id,
+              file: config.fileName,
+              message: `Auth token is only ${token.length} characters — vulnerable to brute-force.`,
+              fix: "Use a token of at least 32 characters. Generate one with: openssl rand -hex 32",
+            },
+          ];
         }
         if (token.length < 32) {
-          return [{
-            severity: "warning",
-            category: "runtime",
-            rule: this.id,
-            file: config.fileName,
-            message: `Auth token is ${token.length} characters — consider using 32+.`,
-            fix: "Generate a stronger token: openssl rand -hex 32",
-          }];
+          return [
+            {
+              severity: "warning",
+              category: "runtime",
+              rule: this.id,
+              file: config.fileName,
+              message: `Auth token is ${token.length} characters — consider using 32+.`,
+              fix: "Generate a stronger token: openssl rand -hex 32",
+            },
+          ];
         }
       }
       return [];
@@ -142,16 +188,8 @@ export const runtimeRules: Rule[] = [
     severity: "warning",
     description: "Open DM policy should have allowFrom restrictions",
     check(files) {
-      const config = getConfigJSON(files);
-      if (!config) return [];
       const diagnostics: Diagnostic[] = [];
-
-      const channels = getNestedValue(config.json, "channels") as Record<string, unknown> | undefined;
-      if (!channels || typeof channels !== "object") return [];
-
-      for (const [name, channelConfig] of Object.entries(channels)) {
-        if (!channelConfig || typeof channelConfig !== "object") continue;
-        const ch = channelConfig as Record<string, unknown>;
+      for (const [name, ch, fileName] of iterChannels(files)) {
         const dmPolicy = ch.dmPolicy as string | undefined;
         const allowFrom = ch.allowFrom as unknown[] | undefined;
 
@@ -160,7 +198,7 @@ export const runtimeRules: Rule[] = [
             severity: "warning",
             category: "runtime",
             rule: this.id,
-            file: config.fileName,
+            file: fileName,
             message: `Channel "${name}": DM policy is "open" with no allowFrom — anyone can command your agent.`,
             fix: `Add allowFrom with authorized user IDs, or set dmPolicy to "pairing".`,
           });
@@ -176,16 +214,8 @@ export const runtimeRules: Rule[] = [
     severity: "warning",
     description: "Group policy should use allowlist",
     check(files) {
-      const config = getConfigJSON(files);
-      if (!config) return [];
       const diagnostics: Diagnostic[] = [];
-
-      const channels = getNestedValue(config.json, "channels") as Record<string, unknown> | undefined;
-      if (!channels || typeof channels !== "object") return [];
-
-      for (const [name, channelConfig] of Object.entries(channels)) {
-        if (!channelConfig || typeof channelConfig !== "object") continue;
-        const ch = channelConfig as Record<string, unknown>;
+      for (const [name, ch, fileName] of iterChannels(files)) {
         const groupPolicy = ch.groupPolicy as string | undefined;
 
         if (groupPolicy && ["open", "any"].includes(groupPolicy)) {
@@ -193,7 +223,7 @@ export const runtimeRules: Rule[] = [
             severity: "warning",
             category: "runtime",
             rule: this.id,
-            file: config.fileName,
+            file: fileName,
             message: `Channel "${name}": Group policy is "${groupPolicy}" — any group can trigger your agent.`,
             fix: 'Set groupPolicy to "allowlist" and define allowed groups.',
           });
@@ -207,13 +237,22 @@ export const runtimeRules: Rule[] = [
     id: "runtime/config-secrets",
     category: "runtime",
     severity: "warning",
-    description: "Config should use env var references instead of plaintext secrets",
+    description:
+      "Config should use env var references instead of plaintext secrets",
     check(files) {
       const config = getConfigJSON(files);
       if (!config) return [];
       const diagnostics: Diagnostic[] = [];
 
-      const sensitiveKeys = ["password", "secret", "apikey", "api_key", "privatekey", "private_key", "token"];
+      const sensitiveKeys = [
+        "password",
+        "secret",
+        "apikey",
+        "api_key",
+        "privatekey",
+        "private_key",
+        "token",
+      ];
 
       const ruleId = this.id;
       const fileName = config.fileName;
@@ -225,14 +264,32 @@ export const runtimeRules: Rule[] = [
         if (!obj || typeof obj !== "object") return;
         // Skip env var definition sections entirely
         if (envDefinitionPrefixes.some((p) => objPath.startsWith(p))) return;
-        for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+        for (const [key, value] of Object.entries(
+          obj as Record<string, unknown>,
+        )) {
           const currentPath = objPath ? `${objPath}.${key}` : key;
           // Skip env var definition sections
-          if (envDefinitionPrefixes.some((p) => currentPath.startsWith(p))) continue;
-          if (typeof value === "string" && value.length > 0 && !value.startsWith("$")) {
+          if (envDefinitionPrefixes.some((p) => currentPath.startsWith(p)))
+            continue;
+          if (
+            typeof value === "string" &&
+            value.length > 0 &&
+            !value.startsWith("$")
+          ) {
             if (sensitiveKeys.some((sk) => key.toLowerCase().includes(sk))) {
               // Skip if it looks like a mode value (e.g., "token" for auth.mode)
-              if (["token", "password", "off", "none", "pairing", "allowlist", "open"].includes(value)) continue;
+              if (
+                [
+                  "token",
+                  "password",
+                  "off",
+                  "none",
+                  "pairing",
+                  "allowlist",
+                  "open",
+                ].includes(value)
+              )
+                continue;
               diagnostics.push({
                 severity: "warning",
                 category: "runtime",
