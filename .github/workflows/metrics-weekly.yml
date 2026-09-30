@@ -10,7 +10,7 @@ name: metrics-weekly
 jobs:
   snapshot:
     uses: >-
-      webuildstuffio/repo-review/.github/workflows/metrics-reusable.yml@ec691df5288ea8b9bdce1f9526a6fa1adf6567f2
+      webuildstuffio/repo-review/.github/workflows/metrics-reusable.yml@da0a07a17d2504691ba3ac1d42d29e51b31fff8b
     with:
       run_snapshot: true
       language: typescript
