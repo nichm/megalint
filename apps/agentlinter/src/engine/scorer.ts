@@ -29,9 +29,8 @@ export function lint(workspacePath: string, files: FileInfo[]): LintResult {
           : coreFiles;  // other categories only check core agent files
       const diagnostics = rule.check(targetFiles);
       allDiagnostics.push(...diagnostics);
-    } catch (e) {
+    } catch {
       // Rule failed — skip silently
-      console.error(`Rule ${rule.id} failed:`, e);
     }
   }
 

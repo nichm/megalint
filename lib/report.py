@@ -296,7 +296,7 @@ def build_report_data(m):
                 "clarity": m["avg_pl_clarity"],
                 "security_raw": m["avg_pl_security"],
                 "cost_efficiency_raw": m["avg_pl_cost"],
-                "note": "Quality pillar = clarity only (0-10 scaled to 0-100). PromptLint security always 10/10 for MDS files (checks for injection patterns, not defense). Real security via Prompt Hardener pillar. Cost excluded — handled by Token Budget pillar.",
+                "note": "Quality pillar = clarity only (0-10 scaled to 0-100). PromptLint security checks for injection patterns, not defense. Real security via Prompt Hardener pillar. Cost excluded — handled by Token Budget pillar.",
             },
         },
         "agents": agents_data,

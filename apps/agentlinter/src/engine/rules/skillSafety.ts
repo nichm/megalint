@@ -2,6 +2,7 @@
 /* Pre-install security checks for agent skills */
 
 import { Rule, Diagnostic, FileInfo } from "../types";
+import { parseFrontmatter, getFrontmatterField } from "./helpers";
 
 /** Filter files to only SKILL.md files inside skills/ directories */
 function getSkillMdFiles(files: FileInfo[]): FileInfo[] {
@@ -114,13 +115,11 @@ export const skillSafetyRules: Rule[] = [
       const skillFiles = getSkillMdFiles(files);
 
       for (const file of skillFiles) {
-        if (!file.content.startsWith("---")) continue;
+        const frontmatter = parseFrontmatter(file.content);
+        if (!frontmatter) continue;
 
-        const frontmatter = file.content.split("---")[1] || "";
-        const nameMatch = frontmatter.match(/^name:\s*["']?([^\n"']+)["']?/m);
-        if (!nameMatch) continue;
-
-        const declaredName = nameMatch[1].trim();
+        const declaredName = getFrontmatterField(frontmatter, "name");
+        if (!declaredName) continue;
         const parts = file.name.split("/");
         const skillDirIndex = parts.lastIndexOf("SKILL.md") - 1;
         if (skillDirIndex < 0) continue;
@@ -152,15 +151,11 @@ export const skillSafetyRules: Rule[] = [
       const skillFiles = getSkillMdFiles(files);
 
       for (const file of skillFiles) {
-        if (!file.content.startsWith("---")) continue;
+        const frontmatter = parseFrontmatter(file.content);
+        if (!frontmatter) continue;
 
-        const frontmatter = file.content.split("---")[1] || "";
-        const descMatch = frontmatter.match(
-          /^description:\s*["']?([^\n"']+)["']?/m,
-        );
-        if (!descMatch) continue;
-
-        const description = descMatch[1].trim();
+        const description = getFrontmatterField(frontmatter, "description");
+        if (!description) continue;
 
         const hasWhenToUse =
           /when\s+to\s+use/i.test(description) ||
@@ -203,7 +198,7 @@ export const skillSafetyRules: Rule[] = [
       const skillFiles = getSkillMdFiles(files);
 
       for (const file of skillFiles) {
-        if (!file.content.startsWith("---")) {
+        if (!parseFrontmatter(file.content)) {
           diagnostics.push({
             severity: "warning",
             category: "skillSafety",
@@ -216,7 +211,7 @@ export const skillSafetyRules: Rule[] = [
           continue;
         }
 
-        const frontmatter = file.content.split("---")[1] || "";
+        const frontmatter = parseFrontmatter(file.content)!;
         if (!frontmatter.includes("description")) {
           diagnostics.push({
             severity: "warning",
@@ -327,8 +322,8 @@ export const skillSafetyRules: Rule[] = [
       const skillFiles = getSkillMdFiles(files);
 
       for (const file of skillFiles) {
-        const hasFrontmatter = file.content.startsWith("---");
-        if (!hasFrontmatter) {
+        const frontmatter = parseFrontmatter(file.content);
+        if (!frontmatter) {
           diagnostics.push({
             severity: "info",
             category: "skillSafety",
@@ -341,7 +336,6 @@ export const skillSafetyRules: Rule[] = [
           continue;
         }
 
-        const frontmatter = file.content.split("---")[1] || "";
         if (!frontmatter.includes("author")) {
           diagnostics.push({
             severity: "info",

@@ -1,34 +1,51 @@
 # Megalint
 
-Unified prompt linting for OpenClaw MDS agent workspaces. Four complementary tools run in parallel, producing a single merged report with consistent scoring.
+AI prompt, skill, and agent linter. Four complementary tools run in parallel, producing a single merged report with consistent scoring. Supports AI skills, system prompts, and agent workspaces.
 
 ## Quick Start
 
 ```bash
-./megalint.sh                                  # Static analysis only (free)
-./megalint.sh --yes                            # Include Prompt Hardener (API cost)
-./megalint.sh --format both --yes              # Save JSON + Markdown reports
-./megalint.sh passportio kodo --format md      # Specific agents, Markdown report
-./megalint.sh --model claude-opus-4-6 -y       # Use Opus for deeper analysis
-./megalint.sh --help                           # All options
+# Skills (primary use case)
+./megalint.sh --mode skills ~/.cursor/skills/           # Lint all skills
+./megalint.sh --mode skills ~/.cursor/skills/bugfix      # Lint one skill
+./megalint.sh ~/.cursor/skills/stop-slop                 # Auto-detect: skills mode
+
+# Prompts
+./megalint.sh my-system-prompt.md                        # Lint a prompt file
+./megalint.sh AGENTS.md CLAUDE.md                        # Multiple prompt files
+
+# Agent workspaces (legacy)
+./megalint.sh --mode agents --agents-dir src/agents      # OpenClaw workspace
+
+# Common options
+./megalint.sh --yes                                      # Include Prompt Hardener (API cost)
+./megalint.sh --format both --yes                        # Save JSON + Markdown reports
+./megalint.sh --help                                     # All options
 ```
+
+## Modes
+
+| Mode | Description | Auto-detect |
+|------|-------------|-------------|
+| `--mode skills` | Skill directories with SKILL.md | Has `SKILL.md` |
+| `--mode prompts` | Individual .md prompt files | Fallback |
+| `--mode agents` | OpenClaw MDS agent workspaces | Has `AGENTS.md` + `SOUL.md` |
+| `--mode auto` | Detect from input (default) | — |
 
 ## Why Four Tools?
 
 Each tool solves a different layer of prompt quality. No single tool covers everything.
 
-| Capability | AgentLinter | PromptLint | Home-Grow | Prompt Hardener |
-|-----------|:-----------:|:----------:|:---------:|:---------------:|
+| Capability | AgentLinter | PromptLint | Conventions | Prompt Hardener |
+|-----------|:-----------:|:----------:|:-----------:|:---------------:|
 | **Type** | Static (Node.js) | Static (Python) | Static (Bash) | LLM-powered (API) |
-| **Scope** | Whole workspace | Per-file | Cross-agent | Per-agent |
-| **Cost** | Free | Free | Free | ~$0.02/agent |
-| **Speed** | ~1s/agent | ~0.5s/file | Instant | ~5s/agent |
+| **Scope** | Whole workspace | Per-file | Cross-item | Per-item |
+| **Cost** | Free | Free | Free | ~$0.02/item |
+| **Speed** | ~1s/item | ~0.5s/file | Instant | ~5s/item |
 | | | | | |
 | File structure / naming | **Yes** | | **Yes** | |
 | Required files present | | | **Yes** | |
 | Section hierarchy | **Yes** | | | |
-| Cross-file consistency | **Yes** | | | |
-| Shared file references (BOOT→shared) | | | **Yes** | |
 | Vague instructions / passive voice | **Yes** | **Yes** | | |
 | Contradictions / conflicting directives | **Yes** | **Yes** | | |
 | Ambiguous pronouns / naked conditionals | **Yes** | | | |
@@ -37,61 +54,53 @@ Each tool solves a different layer of prompt quality. No single tool covers ever
 | Injection patterns (OWASP regex) | | **Yes** | | |
 | Prompt injection defense | | | | **Yes** |
 | Persona switching defense | | | | **Yes** |
-| Spotlighting (input tagging) | | | | **Yes** |
-| Random sequence enclosure | | | | **Yes** |
 | Role consistency | | | | **Yes** |
-| Anti-sycophancy opener | | | **Yes** | |
-| Action tiers validation | | | **Yes** | |
-| Tone calibration table | | | **Yes** | |
-| Continuity line | | | **Yes** | |
-| Timezone consistency | | | **Yes** | |
-| Security section presence | | | **Yes** | |
-| Memory workflow reference | | | **Yes** | |
-| Heartbeat contract validation | | | **Yes** | |
-| Token budget enforcement | | | **Yes** | |
-| Agent roster count | | | **Yes** | |
-| Canonical wording consistency | | | **Yes** | |
-| Bootstrap cleanup | | | **Yes** | |
-| Boot checklist structure | | | **Yes** | |
+| Skill SKILL.md structure | | | **Yes** | |
+| Skill when-to-use guidance | | | **Yes** | |
+| Skill dangerous commands | | | **Yes** | |
+| Skill actionable instructions | | | **Yes** | |
 | Memory / session handoff | **Yes** | | | |
 | Skill safety (dangerous commands) | **Yes** | | | |
-| Directive imports (## Directives, paths, dedup across 6 config files) | | | **Yes** | |
 
-### Directive import enforcement (Home-Grow)
+### Skills mode convention checks
 
-Home-Grow enforces the directive import system: agents use `## Directives` in AGENTS.md plus @import() lines across SOUL.md, TOOLS.md, HEARTBEAT.md, MEMORY.md, and BOOT.md to pull shared directive files instead of inline duplication. Flags are configurable in `apps/homegrow/rules.conf`.
+In skills mode, the convention checker validates skill quality:
 
-| Rule | Flag | Severity | Description |
-|------|------|----------|-------------|
-| check_imports_section | CHECK_IMPORTS_SECTION | ERROR | AGENTS.md must have ## Directives section |
-| check_imports_valid_paths | CHECK_IMPORTS_VALID_PATHS | ERROR | All import paths resolve to directive files |
-| check_directives_exist | CHECK_DIRECTIVES_EXIST | ERROR | All 28 directive files present in shared/directives/ |
-| check_imports_completeness | CHECK_IMPORTS_COMPLETENESS | WARN | Agent imports match manifest.conf requirements |
-| check_imports_no_duplication | CHECK_IMPORTS_NO_DUPLICATION | WARN | No inline content duplicating imported directives |
-| check_imports_boot_integration | CHECK_IMPORTS_BOOT_INTEGRATION | WARN | BOOT.md references @import directives |
-| check_imports_tools_dedup | CHECK_IMPORTS_TOOLS_DEDUP | WARN | TOOLS.md doesn't duplicate shared tool content |
-| check_imports_user_dedup | CHECK_IMPORTS_USER_DEDUP | WARN | USER.md doesn't duplicate USER_CORE content |
-| check_legacy_shared_files | CHECK_LEGACY_SHARED_FILES | WARN | Old monolithic shared files cleaned up |
-| check_orphan_directives | CHECK_ORPHAN_DIRECTIVES | INFO | No directive files unused by any agent |
+| Check | Severity | Description |
+|-------|----------|-------------|
+| skill_file_exists | ERROR | SKILL.md must exist in each skill dir |
+| skill_description | WARN | SKILL.md has a clear description/purpose |
+| skill_when_to_use | WARN | SKILL.md has when-to-use guidance |
+| skill_structure | WARN | SKILL.md has structured headings |
+| skill_dangerous_commands | ERROR | No dangerous commands (rm -rf /, curl\|sh, etc.) |
+| skill_actionable | WARN | SKILL.md has steps, bullets, or code examples |
+| skill_injection | WARN | No prompt injection patterns |
+| skill_file_count | INFO | Reasonable number of files per skill |
+
+### Agents mode convention checks (legacy)
+
+In agents mode, the full OpenClaw convention suite runs (31+ checks). See `RULES_GUIDE.md`.
 
 **In short:**
-- **AgentLinter** = ESLint for agent workspaces (structure + clarity + security rules)
+- **AgentLinter** = ESLint for prompts (structure + clarity + security rules)
 - **PromptLint** = per-file quality scanner (clarity + cost + injection patterns)
-- **Home-Grow** = OpenClaw-specific consistency checks (the stuff only we know to check)
+- **Conventions** = mode-specific consistency checks (skills, prompts, or agents)
 - **Prompt Hardener** = active security testing via LLM (finds what regex can't)
 
 ## Options
 
 | Flag | Description |
 |------|-------------|
+| `--mode MODE` | Linting mode: `auto`, `skills`, `prompts`, `agents` (default: auto) |
 | `-y, --yes` | Skip cost confirmation for Prompt Hardener |
 | `-m, --model MODEL` | Override model (`claude-sonnet-4-6` or `claude-opus-4-6`) |
 | `-f, --format FORMAT` | Output report: `json`, `md`, or `both` |
 | `--pass-threshold N` | Minimum score to pass (default: 70) |
-| `--no-blocking` | Don't fail on Home-Grow errors regardless of score |
+| `--no-blocking` | Don't fail on convention errors regardless of score |
+| `-d, --agents-dir DIR` | Override input directory |
 | `-c, --config FILE` | Load alternate config file |
 | `-h, --help` | Show help |
-| `[agent...]` | Lint specific agents (default: all) |
+| `[path...]` | Lint specific items (default: all in directory) |
 
 ## Configuration
 
@@ -227,18 +236,18 @@ All tools are cloned directly into this repo (no `.git`). Edit source directly:
 ## Directory Layout
 
 ```
-dev-tools/megalint/
-  megalint.sh            # Unified runner (all 4 tools)
+megalint/
+  megalint.sh            # Unified runner (all 4 tools, 3 modes)
   megalint.conf          # Scoring weights, thresholds, grade scale
   apps/                  # Self-contained tool apps
     agentlinter/         # TypeScript, workspace-level linting
     promptlint/          # Python, per-file quality scoring
     prompt-hardener/     # Python, LLM-powered security testing
-    homegrow/            # Bash, OpenClaw-specific consistency checks
-      run.sh             # 31 checks as functions (single source of truth)
+    homegrow/            # Bash, mode-aware convention checks
+      run.sh             # Skills + prompts + agents checks (single source of truth)
       rules.conf         # Per-check toggles + token budget targets
   lib/                   # Extracted Python modules (testable, lintable)
-    config.py            # Single source of truth for weights, grades, pricing
+    config.py            # Single source of truth for weights, grades, pricing, modes
     process.py           # Tool adapters, process_all, writes summary.json
     display.py           # Reads summary.json, prints terminal output
     scoring.py           # 5-pillar scoring engine

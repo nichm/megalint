@@ -1,6 +1,7 @@
 /* ─── Clarity Rules (25%) ─── */
 
 import { Rule, Diagnostic } from "../types";
+import { getCoreFiles, findMainFile } from "./helpers";
 
 const VAGUE_PATTERNS = [
   { pattern: /\bbe helpful\b/i, suggestion: "Specify HOW to be helpful (e.g., 'provide code examples', 'explain step by step')" },
@@ -33,13 +34,7 @@ export const clarityRules: Rule[] = [
     description: "Instructions should be specific and actionable, not vague",
     check(files) {
       const diagnostics: Diagnostic[] = [];
-      // Only check core agent files for vague instructions
-      const coreFiles = files.filter(
-        (f) =>
-          !f.name.startsWith("compound/") &&
-          !f.name.startsWith("memory/") &&
-          f.name.endsWith(".md")
-      );
+      const coreFiles = getCoreFiles(files);
       for (const file of coreFiles) {
         for (let i = 0; i < file.lines.length; i++) {
           const line = file.lines[i];
@@ -100,9 +95,7 @@ export const clarityRules: Rule[] = [
     severity: "info",
     description: "Including examples helps the agent understand expected behavior",
     check(files) {
-      const mainFile = files.find(
-        (f) => f.name === "CLAUDE.md" || f.name === "AGENTS.md"
-      );
+      const mainFile = findMainFile(files);
       if (!mainFile) return [];
 
       const hasCodeBlock = mainFile.content.includes("```");
@@ -175,9 +168,7 @@ export const clarityRules: Rule[] = [
     severity: "info",
     description: "Files with too many instructions may cause confusion",
     check(files) {
-      const mainFile = files.find(
-        (f) => f.name === "CLAUDE.md" || f.name === "AGENTS.md"
-      );
+      const mainFile = findMainFile(files);
       if (!mainFile) return [];
 
       // Count imperative sentences (rough heuristic)
@@ -218,9 +209,7 @@ export const clarityRules: Rule[] = [
         /\bunless\b.+\b(otherwise|necessary|needed)\b/i,
         /\bif\b.+\b(something goes wrong|things? (?:go|get) (?:wrong|bad))\b/i,
       ];
-      const coreFiles = files.filter(
-        (f) => !f.name.startsWith("compound/") && !f.name.startsWith("memory/") && f.name.endsWith(".md")
-      );
+      const coreFiles = getCoreFiles(files);
       for (const file of coreFiles) {
         for (let i = 0; i < file.lines.length; i++) {
           const line = file.lines[i];
@@ -252,9 +241,7 @@ export const clarityRules: Rule[] = [
     description: "Each bullet point should contain one action, not multiple",
     check(files) {
       const diagnostics: Diagnostic[] = [];
-      const coreFiles = files.filter(
-        (f) => !f.name.startsWith("compound/") && !f.name.startsWith("memory/") && f.name.endsWith(".md")
-      );
+      const coreFiles = getCoreFiles(files);
       for (const file of coreFiles) {
         for (let i = 0; i < file.lines.length; i++) {
           const line = file.lines[i].trim();
@@ -359,9 +346,7 @@ export const clarityRules: Rule[] = [
       const diagnostics: Diagnostic[] = [];
       const PRONOUN_PATTERN = /\b(it|this|that|they|them|these|those)\b/gi;
       const SAFE_PHRASES = /\b(this file|this directory|this project|this section|this workspace|that case|this means|that is|this way|if this|it is|it's)\b/i;
-      const coreFiles = files.filter(
-        (f) => !f.name.startsWith("compound/") && !f.name.startsWith("memory/") && f.name.endsWith(".md")
-      );
+      const coreFiles = getCoreFiles(files);
       for (const file of coreFiles) {
         for (let i = 0; i < file.lines.length; i++) {
           const line = file.lines[i].trim();
@@ -394,7 +379,7 @@ export const clarityRules: Rule[] = [
     check(files) {
       const diagnostics: Diagnostic[] = [];
       const TRIGGER_WORDS = /\b(when|after|before|on|during|every|if|upon|at|while|once)\b/i;
-      const mainFile = files.find((f) => f.name === "CLAUDE.md" || f.name === "AGENTS.md");
+      const mainFile = findMainFile(files);
       if (!mainFile) return [];
       let inGenericSection = false;
       for (let i = 0; i < mainFile.lines.length; i++) {
@@ -437,9 +422,7 @@ export const clarityRules: Rule[] = [
     check(files) {
       const diagnostics: Diagnostic[] = [];
       const SUBORDINATORS = /\b(which|although|because|since|while|whereas|whereby|wherein|wherever|whenever)\b/gi;
-      const coreFiles = files.filter(
-        (f) => !f.name.startsWith("compound/") && !f.name.startsWith("memory/") && f.name.endsWith(".md")
-      );
+      const coreFiles = getCoreFiles(files);
       for (const file of coreFiles) {
         for (let i = 0; i < file.lines.length; i++) {
           const line = file.lines[i].trim();
@@ -483,9 +466,7 @@ export const clarityRules: Rule[] = [
     check(files) {
       const diagnostics: Diagnostic[] = [];
       const PRIORITY_MARKERS = /\b(critical|important|must|required|optional|nice.?to.?have|priority|P[0-3]|⚠️|🔴|MUST|SHOULD|MAY)\b/;
-      const coreFiles = files.filter(
-        (f) => !f.name.startsWith("compound/") && !f.name.startsWith("memory/") && f.name.endsWith(".md")
-      );
+      const coreFiles = getCoreFiles(files);
       for (const file of coreFiles) {
         const bullets = file.lines.filter((l) => /^\s*[-*]\s/.test(l));
         if (bullets.length < 10) continue;
@@ -546,9 +527,7 @@ export const clarityRules: Rule[] = [
         "MUST", "SHALL", "SHOULD", "MAY", "REQUIRED", "RECOMMENDED",
         "OPTIONAL", "NOT", "NEVER", "ALWAYS", "ALL", "ANY", "ONLY",
       ]);
-      const coreFiles = files.filter(
-        (f) => !f.name.startsWith("compound/") && !f.name.startsWith("memory/") && f.name.endsWith(".md")
-      );
+      const coreFiles = getCoreFiles(files);
       for (const file of coreFiles) {
         const found = new Set<string>();
         for (let i = 0; i < file.lines.length; i++) {

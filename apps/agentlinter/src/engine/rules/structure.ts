@@ -1,6 +1,7 @@
 /* ─── Structure Rules (20%) ─── */
 
 import { Rule, FileInfo, Diagnostic } from "../types";
+import { getCoreFiles, findMainFile } from "./helpers";
 
 export const structureRules: Rule[] = [
   {
@@ -179,12 +180,7 @@ export const structureRules: Rule[] = [
     check(files) {
       const diagnostics: Diagnostic[] = [];
       // Only check core agent files, not compound/working docs
-      const coreFiles = files.filter(
-        (f) =>
-          !f.name.startsWith("compound/") &&
-          !f.name.startsWith("memory/") &&
-          f.name.endsWith(".md")
-      );
+      const coreFiles = getCoreFiles(files);
       for (const file of coreFiles) {
         for (let idx = 0; idx < file.sections.length; idx++) {
           const section = file.sections[idx];
@@ -251,11 +247,8 @@ export const structureRules: Rule[] = [
     description: "Files should indicate when they were last updated",
     check(files) {
       const diagnostics: Diagnostic[] = [];
-      const coreFiles = files.filter(
-        (f) =>
-          !f.name.startsWith("compound/") &&
-          !f.name.startsWith("memory/") &&
-          (f.name === "CLAUDE.md" || f.name === "AGENTS.md" || f.name === "TOOLS.md")
+      const coreFiles = getCoreFiles(files).filter(
+        (f) => f.name === "CLAUDE.md" || f.name === "AGENTS.md" || f.name === "TOOLS.md"
       );
       for (const file of coreFiles) {
         const hasDate = /(?:last )?update|version|modified|date|v\d+\.\d+/i.test(file.content);

@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Megalint process layer — parses all tool outputs, computes scores, writes summary.json.
 
-Replaces 15+ inline Python snippets from megalint.sh.
+Supports three modes:
+  - agents:  OpenClaw MDS workspaces (AGENTS.md, SOUL.md, etc.)
+  - skills:  Skill directories (SKILL.md + supporting files)
+  - prompts: Individual .md prompt files
+
 Reads tool outputs from tmp_dir, runs scoring, writes tmp_dir/summary.json.
 """
 
@@ -16,18 +20,42 @@ _SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
-from lib.config import load_config, Config, LOAD_WEIGHTS  # noqa: E402
+from lib.config import load_config, Config, LOAD_WEIGHTS, STANDARD_FILES, Mode  # noqa: E402
 
-STANDARD_MD_FILES = (
-    "AGENTS.md",
-    "SOUL.md",
-    "IDENTITY.md",
-    "USER.md",
-    "TOOLS.md",
-    "HEARTBEAT.md",
-    "MEMORY.md",
-    "BOOT.md",
-)
+
+def _get_standard_files(mode: Mode = "agents") -> tuple[str, ...]:
+    """Return expected file list for a given mode."""
+    return STANDARD_FILES.get(mode, STANDARD_FILES["agents"])
+
+
+def _get_load_weights(mode: Mode = "agents") -> dict[str, int]:
+    """Return load frequency weights for a given mode."""
+    return LOAD_WEIGHTS.get(mode, LOAD_WEIGHTS["agents"])
+
+
+def _discover_md_files(item_dir: str, mode: Mode = "agents") -> list[str]:
+    """Discover .md files to lint in a directory based on mode.
+
+    agents: only STANDARD_FILES
+    skills: SKILL.md + all other .md files found
+    prompts: all .md files
+    """
+    if mode == "agents":
+        return list(_get_standard_files("agents"))
+
+    found = []
+    if not os.path.isdir(item_dir):
+        return found
+    for f in sorted(os.listdir(item_dir)):
+        if f.endswith(".md"):
+            found.append(f)
+
+    if mode == "skills":
+        # SKILL.md first, then others
+        if "SKILL.md" in found:
+            found.remove("SKILL.md")
+            found.insert(0, "SKILL.md")
+    return found
 
 
 def process_agentlinter(al_dir: str, agents: List[str]) -> Dict[str, Any]:
@@ -81,25 +109,28 @@ def process_agentlinter(al_dir: str, agents: List[str]) -> Dict[str, Any]:
     return result
 
 
-def process_promptlint(pl_dir: str, agents: List[str]) -> Dict[str, Any]:
-    """Parse PromptLint JSON outputs. Returns per_agent per-file scores (clarity, security, cost, overall)."""
+def process_promptlint(pl_dir: str, items: List[str], mode: Mode = "agents") -> Dict[str, Any]:
+    """Parse PromptLint JSON outputs. Returns per-item per-file scores (clarity, security, cost, overall)."""
     result: Dict[str, Any] = {"per_agent": {}, "totals": {"clarity": 0.0, "security": 0.0, "cost": 0.0, "files": 0}}
     if not os.path.isdir(pl_dir):
         return result
 
     total_clarity = total_security = total_cost = total_files = 0
 
-    for agent in agents:
-        agent_dir = os.path.join(pl_dir, agent)
-        if not os.path.isdir(agent_dir):
+    for item in items:
+        item_dir = os.path.join(pl_dir, item)
+        if not os.path.isdir(item_dir):
             continue
         files_data: Dict[str, Dict[str, float]] = {}
-        agent_clarity = agent_security = agent_cost = file_count = 0.0
+        item_clarity = item_security = item_cost = file_count = 0.0
 
-        for fname in STANDARD_MD_FILES:
-            jf = os.path.join(agent_dir, f"{fname}.json")
-            if not os.path.isfile(jf):
+        # Discover which json files exist (mode-aware)
+        available_jsons = sorted(os.listdir(item_dir)) if os.path.isdir(item_dir) else []
+        for jf_name in available_jsons:
+            if not jf_name.endswith(".json"):
                 continue
+            jf = os.path.join(item_dir, jf_name)
+            fname = jf_name.replace(".json", "")
             try:
                 with open(jf) as f:
                     d = json.load(f)
@@ -115,20 +146,20 @@ def process_promptlint(pl_dir: str, agents: List[str]) -> Dict[str, Any]:
             overall = float(scores.get("overall", 0))
 
             files_data[fname] = {"clarity": clarity, "security": security, "cost": cost, "overall": overall}
-            agent_clarity += clarity
-            agent_security += security
-            agent_cost += cost
+            item_clarity += clarity
+            item_security += security
+            item_cost += cost
             file_count += 1
             total_clarity += clarity
             total_security += security
             total_cost += cost
             total_files += 1
 
-        result["per_agent"][agent] = {"files": files_data}
+        result["per_agent"][item] = {"files": files_data}
         if file_count > 0:
-            result["per_agent"][agent]["avg_clarity"] = round(agent_clarity / file_count, 1)
-            result["per_agent"][agent]["avg_security"] = round(agent_security / file_count, 1)
-            result["per_agent"][agent]["avg_cost"] = round(agent_cost / file_count, 1)
+            result["per_agent"][item]["avg_clarity"] = round(item_clarity / file_count, 1)
+            result["per_agent"][item]["avg_security"] = round(item_security / file_count, 1)
+            result["per_agent"][item]["avg_cost"] = round(item_cost / file_count, 1)
 
     result["totals"]["clarity"] = round(total_clarity, 1)
     result["totals"]["security"] = round(total_security, 1)
@@ -233,14 +264,18 @@ def process_hardener(ph_dir: str, agents: List[str], hardener_ran: bool) -> Opti
     return result
 
 
-def process_budgets(agent_dirs: Dict[str, str], config: Config, shared_dir: str = "") -> Dict[str, Any]:
-    """Compute per-file token budget scores using tiktoken_count and config.budgets."""
+def process_budgets(item_dirs: Dict[str, str], config: Config, shared_dir: str = "") -> Dict[str, Any]:
+    """Compute per-file token budget scores using tiktoken_count and config.budgets.
+
+    In skills/prompts mode, also scores any .md files without explicit budgets
+    using a default budget (3000 tokens for skills, 5000 for prompts).
+    """
     result: Dict[str, Any] = {"per_agent": {}, "fleet_avg": 0.0}
 
     try:
         from lib.tiktoken_count import count_file
     except ImportError:
-        def count_file(path: str) -> int:
+        def count_file(path: str, expand_imports=None) -> int:
             with open(path) as f:
                 words = len(f.read().split())
             return (words * 13 + 9) // 10
@@ -254,32 +289,57 @@ def process_budgets(agent_dirs: Dict[str, str], config: Config, shared_dir: str 
         headroom = budget * 4
         return max(0.0, round(100.0 * (1.0 - over / headroom), 1))
 
-    agent_avgs = []
-    for agent, agent_dir in agent_dirs.items():
-        if not os.path.isdir(agent_dir):
+    mode = config.mode
+    load_weights = _get_load_weights(mode)
+    default_budget = {"skills": 3000, "prompts": 5000}.get(mode, 0)
+
+    item_avgs = []
+    for item, item_dir in item_dirs.items():
+        if not os.path.isdir(item_dir):
             continue
         files_data: Dict[str, Dict[str, Any]] = {}
-        for fname, budget in config.budgets.items():
-            fpath = os.path.join(agent_dir, fname)
-            if not os.path.exists(fpath):
-                continue
-            tokens = count_file(fpath, shared_dir if shared_dir else None)
-            sc = score_file(tokens, budget)
-            pct = round(tokens / budget * 100) if budget > 0 else 0
-            w = LOAD_WEIGHTS.get(fname, 1)
-            files_data[fname] = {
-                "tokens": tokens,
-                "budget": budget,
-                "score": sc,
-                "pct": pct,
-                "weight": w,
-            }
+
+        # For skills/prompts: discover all .md files and score them
+        if mode in ("skills", "prompts"):
+            md_files = _discover_md_files(item_dir, mode)
+            for fname in md_files:
+                fpath = os.path.join(item_dir, fname)
+                if not os.path.exists(fpath):
+                    continue
+                budget = config.budgets.get(fname, default_budget)
+                tokens = count_file(fpath, shared_dir if shared_dir else None)
+                sc = score_file(tokens, budget)
+                pct = round(tokens / budget * 100) if budget > 0 else 0
+                w = load_weights.get(fname, 1)
+                files_data[fname] = {
+                    "tokens": tokens,
+                    "budget": budget,
+                    "score": sc,
+                    "pct": pct,
+                    "weight": w,
+                }
+        else:
+            # Agents mode: only budgeted files
+            for fname, budget in config.budgets.items():
+                fpath = os.path.join(item_dir, fname)
+                if not os.path.exists(fpath):
+                    continue
+                tokens = count_file(fpath, shared_dir if shared_dir else None)
+                sc = score_file(tokens, budget)
+                pct = round(tokens / budget * 100) if budget > 0 else 0
+                w = load_weights.get(fname, 1)
+                files_data[fname] = {
+                    "tokens": tokens,
+                    "budget": budget,
+                    "score": sc,
+                    "pct": pct,
+                    "weight": w,
+                }
         if not files_data:
             continue
         weighted_sum = sum(f["score"] * f["weight"] for f in files_data.values())
         total_weight = sum(f["weight"] for f in files_data.values())
         avg = round(weighted_sum / total_weight, 1) if total_weight > 0 else 0.0
-        # Build display-ready file list (bar, level, freq)
         freq_map = {3: "×msg", 2: "×hb", 1: "×dm"}
         files_list = []
         for fname, fd in files_data.items():
@@ -299,11 +359,11 @@ def process_budgets(agent_dirs: Dict[str, str], config: Config, shared_dir: str 
                 "level": level,
                 "freq": freq,
             })
-        result["per_agent"][agent] = {"files": files_list, "avg": avg, "files_raw": files_data}
-        agent_avgs.append(avg)
+        result["per_agent"][item] = {"files": files_list, "avg": avg, "files_raw": files_data}
+        item_avgs.append(avg)
 
-    if agent_avgs:
-        result["fleet_avg"] = round(sum(agent_avgs) / len(agent_avgs), 1)
+    if item_avgs:
+        result["fleet_avg"] = round(sum(item_avgs) / len(item_avgs), 1)
     return result
 
 
@@ -313,6 +373,7 @@ def process_all(
     hardener_ran: bool = False,
     pass_threshold_override: Optional[int] = None,
     blocking_errors_override: Optional[bool] = None,
+    mode: Mode = "agents",
 ) -> Dict[str, Any]:
     """Main orchestrator: read meta, run all processors, call scoring, return full summary dict."""
     meta_file = os.path.join(tmp_dir, "meta.json")
@@ -322,6 +383,8 @@ def process_all(
     with open(meta_file) as f:
         meta = json.load(f)
 
+    # Support mode from meta.json (set by megalint.sh)
+    mode = meta.get("mode", mode)
     agents = meta.get("agents_list", [])
     agent_dirs = meta.get("agent_dirs", {})
     if not agents and agent_dirs:
@@ -334,6 +397,7 @@ def process_all(
         megalint_conf=config_path or os.path.join(script_dir, "megalint.conf"),
         rules_conf=os.path.join(script_dir, "apps", "homegrow", "rules.conf"),
         script_dir=script_dir,
+        mode=mode,
     )
 
     al_dir = os.path.join(tmp_dir, "agentlinter")
@@ -342,9 +406,9 @@ def process_all(
     ph_dir = os.path.join(tmp_dir, "hardener")
 
     agentlinter = process_agentlinter(al_dir, agents)
-    promptlint = process_promptlint(pl_dir, agents)
+    promptlint = process_promptlint(pl_dir, agents, mode)
     homegrow = process_homegrow(hg_dir)
-    shared_dir = os.path.join(script_dir, "..", "..", "src", "shared")
+    shared_dir = meta.get("shared_dir", os.path.join(script_dir, "..", "..", "src", "shared"))
     budget = process_budgets(agent_dirs, config, shared_dir)
     hardener = process_hardener(ph_dir, agents, hardener_ran)
 
@@ -470,6 +534,7 @@ def process_all(
         "git_msg": meta.get("git_msg", ""),
         "timestamp": meta.get("timestamp", ""),
         "agents_list": agents,
+        "mode": mode,
     }
     if hardener:
         summary_meta["hardener_tokens_in"] = hardener.get("actual_tokens_in", 0)
@@ -498,6 +563,7 @@ def main():
     parser.add_argument("--hardener-ran", default="false", choices=("true", "false"), help="Whether Prompt Hardener ran")
     parser.add_argument("--pass-threshold", type=int, default=None, help="Override pass threshold (optional)")
     parser.add_argument("--no-blocking", action="store_true", help="Override blocking_errors to false")
+    parser.add_argument("--mode", default="agents", choices=("agents", "skills", "prompts"), help="Linting mode")
     args = parser.parse_args()
 
     hardener_ran = args.hardener_ran.lower() == "true"
@@ -508,6 +574,7 @@ def main():
         hardener_ran=hardener_ran,
         pass_threshold_override=args.pass_threshold,
         blocking_errors_override=blocking_override,
+        mode=args.mode,
     )
 
 

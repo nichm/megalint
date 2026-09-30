@@ -1,22 +1,8 @@
 /* ─── Remote-Ready Score Rules (5%) ─── */
 /* Checks if the workspace is ready for remote/headless agent execution */
 
-import { Rule, Diagnostic, FileInfo } from "../types";
-
-/** Collect all non-memory/non-compound file content into a single string */
-function collectContent(files: FileInfo[]): string {
-  return files
-    .filter(
-      (f) => !f.name.startsWith("memory/") && !f.name.startsWith("compound/"),
-    )
-    .map((f) => f.content)
-    .join("\n");
-}
-
-/** Find the main agent file (CLAUDE.md or AGENTS.md) */
-function findMainFile(files: FileInfo[]): FileInfo | undefined {
-  return files.find((f) => f.name === "CLAUDE.md" || f.name === "AGENTS.md");
-}
+import { Rule, Diagnostic } from "../types";
+import { getRemoteReadyContext } from "./helpers";
 
 export const remoteReadyRules: Rule[] = [
   {
@@ -26,20 +12,16 @@ export const remoteReadyRules: Rule[] = [
     description:
       "Workspace path should be explicitly documented for remote execution",
     check(files) {
-      const mainFile = findMainFile(files);
-      if (!mainFile) return [];
-
-      const allContent = collectContent(files);
+      const ctx = getRemoteReadyContext(files);
+      if (!ctx) return [];
 
       const hasWorkspacePath =
-        /workspace.*[:=]\s*[`'"]?\/[^\s`'"]+/i.test(allContent) ||
-        /repo.*[:=]\s*[`'"]?\/[^\s`'"]+/i.test(allContent) ||
-        /working\s+dir(?:ectory)?.*[:=]\s*[`'"]?\/[^\s`'"]+/i.test(
-          allContent,
-        ) ||
-        /cwd.*[:=]\s*[`'"]?\/[^\s`'"]+/i.test(allContent) ||
-        /\bworkdir\b.*\/[^\s]+/i.test(allContent) ||
-        /(?:repo|workspace|workdir|cwd)\s*=\s*\/[^\s]+/i.test(allContent);
+        /workspace.*[:=]\s*[`'"]?\/[^\s`'"]+/i.test(ctx.allContent) ||
+        /repo.*[:=]\s*[`'"]?\/[^\s`'"]+/i.test(ctx.allContent) ||
+        /working\s+dir(?:ectory)?.*[:=]\s*[`'"]?\/[^\s`'"]+/i.test(ctx.allContent) ||
+        /cwd.*[:=]\s*[`'"]?\/[^\s`'"]+/i.test(ctx.allContent) ||
+        /\bworkdir\b.*\/[^\s]+/i.test(ctx.allContent) ||
+        /(?:repo|workspace|workdir|cwd)\s*=\s*\/[^\s]+/i.test(ctx.allContent);
 
       if (!hasWorkspacePath) {
         return [
@@ -47,7 +29,7 @@ export const remoteReadyRules: Rule[] = [
             severity: "warning",
             category: "remoteReady",
             rule: this.id,
-            file: mainFile.name,
+            file: ctx.targetFile,
             message:
               "No explicit workspace path found. Remote/headless agents need a documented workspace path to operate correctly.",
             fix: 'Add workspace path in TOOLS.md or AGENTS.md Runtime section. Example: "repo=/Users/username/project"',
@@ -64,23 +46,20 @@ export const remoteReadyRules: Rule[] = [
     severity: "warning",
     description: "Required environment variables should be documented",
     check(files) {
-      const mainFile = findMainFile(files);
-      const toolsFile = files.find((f) => f.name === "TOOLS.md");
-      if (!mainFile && !toolsFile) return [];
-
-      const allContent = collectContent(files);
+      const ctx = getRemoteReadyContext(files);
+      if (!ctx) return [];
 
       const hasEnvVarUsage =
-        /\$\{?[A-Z][A-Z0-9_]{2,}\}?/.test(allContent) ||
-        /process\.env\.[A-Z_]+/.test(allContent) ||
-        /os\.environ/i.test(allContent);
+        /\$\{?[A-Z][A-Z0-9_]{2,}\}?/.test(ctx.allContent) ||
+        /process\.env\.[A-Z_]+/.test(ctx.allContent) ||
+        /os\.environ/i.test(ctx.allContent);
 
       const hasEnvDocumentation =
-        /env(?:ironment)?\s+var(?:iable)?s?/i.test(allContent) ||
-        /required.*(?:env|environment)/i.test(allContent) ||
-        /\.env\s+(?:file|setup|config)/i.test(allContent) ||
-        /export\s+[A-Z_]+=/.test(allContent) ||
-        /\bENV:\b/i.test(allContent);
+        /env(?:ironment)?\s+var(?:iable)?s?/i.test(ctx.allContent) ||
+        /required.*(?:env|environment)/i.test(ctx.allContent) ||
+        /\.env\s+(?:file|setup|config)/i.test(ctx.allContent) ||
+        /export\s+[A-Z_]+=/.test(ctx.allContent) ||
+        /\bENV:\b/i.test(ctx.allContent);
 
       if (hasEnvVarUsage && !hasEnvDocumentation) {
         return [
@@ -88,7 +67,7 @@ export const remoteReadyRules: Rule[] = [
             severity: "warning",
             category: "remoteReady",
             rule: this.id,
-            file: toolsFile?.name || mainFile?.name || "(workspace)",
+            file: ctx.targetFile,
             message:
               "Environment variables are used but not documented. Remote agents may fail if required env vars are missing.",
             fix: "Add an 'Environment Variables' section listing all required env vars with descriptions and setup instructions.",
@@ -106,21 +85,16 @@ export const remoteReadyRules: Rule[] = [
     description:
       "Model settings should be explicitly configured for reproducible remote execution",
     check(files) {
-      const mainFile = findMainFile(files);
-      const toolsFile = files.find((f) => f.name === "TOOLS.md");
-      if (!mainFile && !toolsFile) return [];
-
-      const allContent = collectContent(files);
+      const ctx = getRemoteReadyContext(files);
+      if (!ctx) return [];
 
       const hasModelConfig =
-        /default[_-]?model\s*[:=]/i.test(allContent) ||
-        /model\s*[:=]\s*["']?(?:anthropic|openai|google|xai|gpt|claude|gemini|grok)/i.test(
-          allContent,
-        ) ||
-        /\bmodel\s*=\s*[a-z]+\/[a-z-]+/i.test(allContent) ||
-        /claude-(?:opus|sonnet|haiku)/i.test(allContent) ||
-        /gpt-4/i.test(allContent) ||
-        /Runtime.*model=/i.test(allContent);
+        /default[_-]?model\s*[:=]/i.test(ctx.allContent) ||
+        /model\s*[:=]\s*["']?(?:anthropic|openai|google|xai|gpt|claude|gemini|grok)/i.test(ctx.allContent) ||
+        /\bmodel\s*=\s*[a-z]+\/[a-z-]+/i.test(ctx.allContent) ||
+        /claude-(?:opus|sonnet|haiku)/i.test(ctx.allContent) ||
+        /gpt-4/i.test(ctx.allContent) ||
+        /Runtime.*model=/i.test(ctx.allContent);
 
       if (!hasModelConfig) {
         return [
@@ -128,7 +102,7 @@ export const remoteReadyRules: Rule[] = [
             severity: "info",
             category: "remoteReady",
             rule: this.id,
-            file: toolsFile?.name || mainFile?.name || "(workspace)",
+            file: ctx.targetFile,
             message:
               "No model settings found. Specifying the model ensures consistent behavior across remote runs.",
             fix: "Document the default model in TOOLS.md. Example: 'default_model: anthropic/claude-opus-4-5'",

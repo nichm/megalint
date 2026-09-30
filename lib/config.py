@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
-"""Megalint config loader — single source of truth for weights, thresholds, grades, pricing."""
+"""Megalint config loader — single source of truth for weights, thresholds, grades, pricing.
+
+Supports three modes:
+  - agents:  OpenClaw MDS workspaces (AGENTS.md, SOUL.md, etc.)
+  - skills:  Skill directories (SKILL.md + supporting files)
+  - prompts: Individual .md prompt files
+"""
 
 import os
 from dataclasses import dataclass, field
+from typing import Literal
 
+
+Mode = Literal["agents", "skills", "prompts"]
 
 _DEFAULT_GRADES = [
     (97, "S"),
@@ -20,14 +29,45 @@ _DEFAULT_GRADES = [
 ]
 
 # Load frequency weights — files that load every message matter more for budget scoring
+# Mode-specific: agents files load per-message, skills load on-demand
 LOAD_WEIGHTS = {
-    "AGENTS.md": 3,     # every message
-    "SOUL.md": 3,
-    "IDENTITY.md": 3,
-    "USER.md": 3,
-    "TOOLS.md": 3,
-    "HEARTBEAT.md": 2,   # ~48x/day
-    "MEMORY.md": 1,      # DM sessions only
+    "agents": {
+        "AGENTS.md": 3,
+        "SOUL.md": 3,
+        "IDENTITY.md": 3,
+        "USER.md": 3,
+        "TOOLS.md": 3,
+        "HEARTBEAT.md": 2,
+        "MEMORY.md": 1,
+    },
+    "skills": {
+        "SKILL.md": 3,
+    },
+    "prompts": {},
+}
+
+# Standard files expected per mode
+STANDARD_FILES = {
+    "agents": ("AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "TOOLS.md", "HEARTBEAT.md", "MEMORY.md", "BOOT.md"),
+    "skills": ("SKILL.md",),
+    "prompts": (),  # dynamic — all .md files in input
+}
+
+# Default token budgets per mode
+_DEFAULT_BUDGETS = {
+    "agents": {
+        "AGENTS.md": 1725,
+        "SOUL.md": 525,
+        "IDENTITY.md": 175,
+        "USER.md": 715,
+        "TOOLS.md": 525,
+        "HEARTBEAT.md": 225,
+        "MEMORY.md": 975,
+    },
+    "skills": {
+        "SKILL.md": 3000,
+    },
+    "prompts": {},
 }
 
 _DEFAULT_PRICING = {
@@ -91,21 +131,15 @@ def _to_grades(raw: dict) -> list[tuple[int, str]]:
     return _DEFAULT_GRADES.copy()
 
 
-def _to_budgets(raw: dict) -> dict[str, int]:
-    """Build budgets dict from rules.conf style."""
+def _to_budgets(raw: dict, mode: Mode = "agents") -> dict[str, int]:
+    """Build budgets dict from rules.conf style, mode-aware."""
+    defaults = dict(_DEFAULT_BUDGETS.get(mode, _DEFAULT_BUDGETS["agents"]))
+
+    # Agents mode: full budget key mapping
     budget_keys = [
         "BUDGET_AGENTS_MD", "BUDGET_SOUL_MD", "BUDGET_IDENTITY_MD",
         "BUDGET_USER_MD", "BUDGET_TOOLS_MD", "BUDGET_HEARTBEAT_MD", "BUDGET_MEMORY_MD",
     ]
-    defaults = {
-        "AGENTS.md": 1725,
-        "SOUL.md": 525,
-        "IDENTITY.md": 175,
-        "USER.md": 715,
-        "TOOLS.md": 525,
-        "HEARTBEAT.md": 225,
-        "MEMORY.md": 975,
-    }
     name_map = {
         "BUDGET_AGENTS_MD": "AGENTS.md",
         "BUDGET_SOUL_MD": "SOUL.md",
@@ -115,6 +149,11 @@ def _to_budgets(raw: dict) -> dict[str, int]:
         "BUDGET_HEARTBEAT_MD": "HEARTBEAT.md",
         "BUDGET_MEMORY_MD": "MEMORY.md",
     }
+    # Skills mode: SKILL.md budget
+    if mode == "skills":
+        budget_keys = ["BUDGET_SKILL_MD"]
+        name_map = {"BUDGET_SKILL_MD": "SKILL.md"}
+
     out = dict(defaults)
     for env_key in budget_keys:
         env_var = f"MEGALINT_{env_key}"
@@ -135,6 +174,7 @@ def _to_budgets(raw: dict) -> dict[str, int]:
 class Config:
     """Megalint configuration."""
 
+    mode: Mode = "agents"
     weight_structure: int = 25
     weight_quality: int = 18
     weight_consistency: int = 22
@@ -148,11 +188,20 @@ class Config:
     tier_warn: float = 1.50
     pricing: dict = field(default_factory=lambda: dict(_DEFAULT_PRICING))
 
+    @property
+    def standard_files(self) -> tuple[str, ...]:
+        return STANDARD_FILES.get(self.mode, STANDARD_FILES["agents"])
+
+    @property
+    def load_weights(self) -> dict[str, int]:
+        return LOAD_WEIGHTS.get(self.mode, LOAD_WEIGHTS["agents"])
+
 
 def load_config(
     megalint_conf: str | None = None,
     rules_conf: str | None = None,
     script_dir: str | None = None,
+    mode: Mode = "agents",
 ) -> Config:
     """Load config from megalint.conf and rules.conf, with env overrides."""
     if script_dir is None:
@@ -166,7 +215,7 @@ def load_config(
     rules = _parse_bash_conf(rules_conf)
 
     grades = _to_grades(mega)
-    budgets = _to_budgets(rules)
+    budgets = _to_budgets(rules, mode)
 
     def _int(key: str, default: int) -> int:
         v = mega.get(key)
@@ -198,7 +247,10 @@ def load_config(
                 pass
         return default
 
+    default_budgets = dict(_DEFAULT_BUDGETS.get(mode, _DEFAULT_BUDGETS["agents"]))
+
     return Config(
+        mode=mode,
         weight_structure=_int("WEIGHT_STRUCTURE", 25),
         weight_quality=_int("WEIGHT_QUALITY", 18),
         weight_consistency=_int("WEIGHT_CONSISTENCY", 22),
@@ -207,10 +259,7 @@ def load_config(
         pass_threshold=_int("PASS_THRESHOLD", 70),
         blocking_errors=_bool("BLOCKING_ERRORS", True),
         grades=grades,
-        budgets=budgets if budgets else {
-            "AGENTS.md": 1725, "SOUL.md": 525, "IDENTITY.md": 175,
-            "USER.md": 715, "TOOLS.md": 525, "HEARTBEAT.md": 225, "MEMORY.md": 975,
-        },
+        budgets=budgets if budgets else default_budgets,
         tier_info=_float("TIER_INFO", 1.25),
         tier_warn=_float("TIER_WARN", 1.50),
         pricing=dict(_DEFAULT_PRICING),

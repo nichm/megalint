@@ -1,28 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# megalint.sh — Unified prompt linter for OpenClaw MDS
+# megalint.sh — AI prompt, skill, and agent linter
 # Runs 4 tools in parallel, merges results into a consistent report.
+#
+# Modes:
+#   agents  — OpenClaw MDS workspaces (AGENTS.md, SOUL.md, etc.)
+#   skills  — Skill directories with SKILL.md files
+#   prompts — Individual .md prompt files
+#   auto    — Detect mode from input structure
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(pwd)"
 
-AGENTS_DIR="$REPO_ROOT/src/agents"
-SHARED_DIR="$REPO_ROOT/src/shared"
+# Default dirs — overridden by mode detection or flags
+AGENTS_DIR=""
+SHARED_DIR=""
 
 # Env overrides (highest priority)
 [[ -n "${MEGALINT_AGENTS_DIR:-}" ]] && AGENTS_DIR="$MEGALINT_AGENTS_DIR"
 [[ -n "${MEGALINT_SHARED_DIR:-}" ]] && SHARED_DIR="$MEGALINT_SHARED_DIR"
 
-command -v rg >/dev/null 2>&1 || { printf '\033[31m%s\033[0m\n' "ripgrep (rg) not found — install for Home-Grow checks"; exit 1; }
-
 AGENTLINTER_BIN="$SCRIPT_DIR/apps/agentlinter/packages/cli/dist/bin.js"
 PROMPTLINT_BIN="$SCRIPT_DIR/apps/promptlint/.venv/bin/promptlint"
 HARDENER_BIN="$SCRIPT_DIR/apps/prompt-hardener/.venv/bin/prompt-hardener"
-
-PY="$SCRIPT_DIR/apps/promptlint/.venv/bin/python"
-[[ -x "$PY" ]] || { printf '\033[31m%s\033[0m\n' "Python venv not found at $PY — run: cd apps/promptlint && uv venv .venv && uv pip install -e ."; exit 1; }
-NODE="$(command -v node 2>/dev/null)" || { printf '\033[31m%s\033[0m\n' "node not found — install Node.js"; exit 1; }
 
 red()    { printf "\033[31m%s\033[0m" "$1"; }
 yellow() { printf "\033[33m%s\033[0m" "$1"; }
@@ -73,6 +74,7 @@ FORMAT_FLAG=""
 THRESHOLD_FLAG=""
 BLOCKING_FLAG=""
 AGENTS_DIR_FLAG=""
+MODE_FLAG=""
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -90,11 +92,18 @@ while [[ $# -gt 0 ]]; do
     --no-blocking)         BLOCKING_FLAG="false"; shift ;;
     --agents-dir|-d)       AGENTS_DIR_FLAG="$2"; shift 2 ;;
     --agents-dir=*)        AGENTS_DIR_FLAG="${1#*=}"; shift ;;
+    --mode)                MODE_FLAG="$2"; shift 2 ;;
+    --mode=*)              MODE_FLAG="${1#*=}"; shift ;;
     --config|-c)           source "$2"; shift 2 ;;
     --config=*)            source "${1#*=}"; shift ;;
     *)                     POSITIONAL_ARGS+=("$1"); shift ;;
   esac
 done
+
+# Validate mode flag
+if [[ -n "$MODE_FLAG" ]] && [[ ! "$MODE_FLAG" =~ ^(auto|agents|skills|prompts)$ ]]; then
+  echo "$(red "Unknown mode: $MODE_FLAG (use auto, agents, skills, or prompts)")"; exit 1
+fi
 
 [[ -n "$THRESHOLD_FLAG" ]] && PASS_THRESHOLD="$THRESHOLD_FLAG"
 [[ -n "$BLOCKING_FLAG" ]] && BLOCKING_ERRORS="$BLOCKING_FLAG"
@@ -104,7 +113,7 @@ if [[ -n "$AGENTS_DIR_FLAG" ]]; then
   elif [[ -d "$AGENTS_DIR_FLAG" ]]; then
     AGENTS_DIR="$(cd "$AGENTS_DIR_FLAG" && pwd)"
   else
-    echo "$(red "Agents directory not found: $AGENTS_DIR_FLAG")"; exit 1
+    echo "$(red "Input directory not found: $AGENTS_DIR_FLAG")"; exit 1
   fi
 fi
 
@@ -112,23 +121,81 @@ if [[ -n "$FORMAT_FLAG" ]] && [[ ! "$FORMAT_FLAG" =~ ^(json|md|both)$ ]]; then
   echo "$(red "Unknown format: $FORMAT_FLAG (use json, md, or both)")"; exit 1
 fi
 
+# ─── Auto-detect mode ────────────────────────────────────────────────────────
+
+detect_mode() {
+  local dir="$1"
+  # Direct skill dir (has SKILL.md)
+  if [[ -f "$dir/SKILL.md" ]]; then
+    echo "skills"; return
+  fi
+  # Parent of skill dirs (children have SKILL.md)
+  for child in "$dir"/*/; do
+    [[ -d "$child" ]] || continue
+    [[ -f "$child/SKILL.md" ]] && { echo "skills"; return; }
+  done
+  # Agent workspace (has AGENTS.md + SOUL.md in children)
+  for child in "$dir"/*/; do
+    [[ -d "$child" ]] || continue
+    [[ -f "$child/AGENTS.md" && -f "$child/SOUL.md" ]] && { echo "agents"; return; }
+  done
+  # Direct agent dir
+  if [[ -f "$dir/AGENTS.md" && -f "$dir/SOUL.md" ]]; then
+    echo "agents"; return
+  fi
+  # Fallback: prompts
+  echo "prompts"
+}
+
+# Resolve mode
+MODE="${MODE_FLAG:-auto}"
+if [[ "$MODE" == "auto" || -z "$MODE" ]]; then
+  # Determine detection target from positional args or AGENTS_DIR
+  DETECT_TARGET=""
+  if [[ ${#POSITIONAL_ARGS[@]} -gt 0 ]]; then
+    first_arg="${POSITIONAL_ARGS[0]}"
+    if [[ -d "$first_arg" ]]; then
+      DETECT_TARGET="$(cd "$first_arg" && pwd)"
+    elif [[ -f "$first_arg" ]]; then
+      MODE="prompts"
+    fi
+  elif [[ -n "$AGENTS_DIR" && -d "$AGENTS_DIR" ]]; then
+    DETECT_TARGET="$AGENTS_DIR"
+  fi
+  if [[ -z "$MODE" || "$MODE" == "auto" ]] && [[ -n "$DETECT_TARGET" ]]; then
+    MODE=$(detect_mode "$DETECT_TARGET")
+  fi
+  [[ -z "$MODE" || "$MODE" == "auto" ]] && MODE="prompts"
+fi
+
 if [[ "$HELP_FLAG" == "true" ]]; then
   cat <<'HELP'
 
-megalint — Unified prompt linter for OpenClaw MDS
+megalint — AI prompt, skill, and agent linter
 
-Usage: ./megalint.sh [options] [agent-path...]
+Usage: ./megalint.sh [options] [path...]
+
+Modes:
+  --mode auto      Auto-detect from input (default)
+  --mode skills    Lint skill directories (SKILL.md + supporting files)
+  --mode prompts   Lint individual .md prompt files
+  --mode agents    Lint OpenClaw MDS agent workspaces (legacy)
 
 Options:
-  -d, --agents-dir DIR       Override agents directory (auto-detects agents/ or src/agents/)
+  -d, --agents-dir DIR       Override input directory
   -y, --yes                  Auto-approve Prompt Hardener API cost (default)
   --no-yes                   Prompt for confirmation before API calls
   -m, --model MODEL          Override model (claude-opus-4-6 | claude-sonnet-4-6)
   -f, --format FORMAT        Output report: json, md, or both (saved to .reports/)
   --pass-threshold N         Minimum score to pass (default: 70)
-  --no-blocking              Don't fail on Home-Grow errors regardless of score
+  --no-blocking              Don't fail on convention errors regardless of score
   -c, --config FILE          Load alternate config file
   -h, --help                 Show this help
+
+Auto-Detection:
+  If the input path (or its children) contain SKILL.md → skills mode
+  If the input path contains AGENTS.md + SOUL.md → agents mode
+  Otherwise → prompts mode (treats each .md file as a prompt)
 
 Token Budget Tiers (2 levels, configurable in rules.conf):
   INFO   base × 1.25   25% over — heads-up
@@ -136,34 +203,35 @@ Token Budget Tiers (2 levels, configurable in rules.conf):
   (Token budgets never block — graduated scoring via Token Budget pillar)
 
 Environment Variable Overrides:
-  MEGALINT_AGENTS_DIR        Override agents directory
-  MEGALINT_SHARED_DIR        Override shared directory
+  MEGALINT_AGENTS_DIR        Override input directory
+  MEGALINT_SHARED_DIR        Override shared directory (agents mode)
+  MEGALINT_BUDGET_SKILL_MD   Override SKILL.md token budget (default: 3000)
   MEGALINT_BUDGET_AGENTS_MD  Override AGENTS.md token budget (default: 1725)
-  MEGALINT_BUDGET_SOUL_MD    Override SOUL.md token budget (default: 525)
-  MEGALINT_BUDGET_*_MD       Override any file budget (IDENTITY, USER, TOOLS, etc.)
+  MEGALINT_BUDGET_*_MD       Override any file budget
   MEGALINT_TIER_INFO         Override INFO multiplier (default: 1.25)
   MEGALINT_TIER_WARN         Override WARN multiplier (default: 1.50)
 
 Scoring (5 pillars, configurable in megalint.conf):
-  Structure    25%   AgentLinter    — workspace structure, clarity, rules
+  Structure    25%   AgentLinter    — structure, clarity, rules
   Quality      18%   PromptLint     — per-file clarity score (0-10 → 0-100)
-  Consistency  22%   Home-Grow      — cross-agent consistency checks
+  Consistency  22%   Conventions    — cross-item consistency checks
   Security     20%   Prompt Hardener — LLM injection testing (skipped = redistributed)
   Token Budget 15%   Length scoring  — per-file token usage vs budget (100 at budget → 0 at 5×)
 
-Models:
-  claude-opus-4-6      $5/MTok in, $25/MTok out  (default, strongest)
-  claude-sonnet-4-6    $3/MTok in, $15/MTok out  (fast)
-
 Examples:
-  ./megalint.sh                                           # All agents (auto-detect)
-  ./megalint.sh --agents-dir src/agents-planned           # All planned agents
-  ./megalint.sh src/agents-planned/soren                  # Single agent by path
+  # Skills
+  ./megalint.sh --mode skills ~/.cursor/skills/           # Lint all skills
+  ./megalint.sh --mode skills ~/.cursor/skills/my-skill   # Lint one skill
+  ./megalint.sh ~/.cursor/skills/bugfix                   # Auto-detect: skills mode
+
+  # Prompts
+  ./megalint.sh --mode prompts my-system-prompt.md        # Lint a prompt file
+  ./megalint.sh AGENTS.md CLAUDE.md                       # Auto-detect: prompts mode
+
+  # Agents (legacy)
+  ./megalint.sh --mode agents --agents-dir src/agents     # OpenClaw workspace
   ./megalint.sh --format both --yes                       # JSON + Markdown reports
   ./megalint.sh --pass-threshold 85                       # Stricter pass bar
-  ./megalint.sh --no-blocking --agents-dir src/agents     # Prod agents, lenient
-  MEGALINT_BUDGET_SOUL_MD=850 ./megalint.sh               # Override SOUL.md budget (256k tier)
-  MEGALINT_TIER_WARN=1.40 ./megalint.sh                   # Tighter warn threshold
 
 Config: megalint.conf (weights, thresholds, grades)
 Rules:  apps/homegrow/rules.conf (budgets, tier multipliers, check toggles)
@@ -172,6 +240,14 @@ Env:    .env (API keys — see .env.example)
 HELP
   exit 0
 fi
+
+# ─── Dependency checks (after help, so --help works without deps) ─────────────
+
+command -v rg >/dev/null 2>&1 || { printf '\033[31m%s\033[0m\n' "ripgrep (rg) not found — install for convention checks"; exit 1; }
+
+PY="$SCRIPT_DIR/apps/promptlint/.venv/bin/python"
+[[ -x "$PY" ]] || { printf '\033[31m%s\033[0m\n' "Python venv not found at $PY — run: cd apps/promptlint && uv venv .venv && uv pip install -e ."; exit 1; }
+NODE="$(command -v node 2>/dev/null)" || { printf '\033[31m%s\033[0m\n' "node not found — install Node.js"; exit 1; }
 
 # ─── Git metadata ─────────────────────────────────────────────────────────────
 
@@ -199,47 +275,123 @@ log "Timestamp: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 log "Git: commit=$GIT_COMMIT branch=$GIT_BRANCH dirty=$GIT_DIRTY"
 log "Git message: $GIT_MSG"
 log "Working directory: $REPO_ROOT"
+log "Mode: $MODE"
 
-# Determine agents + resolve directories
+echo "  $(dim "mode: $MODE")"
+
+# ─── Item discovery (mode-aware) ─────────────────────────────────────────────
+
 declare -A AGENT_DIRS=()
 declare -a BROKEN_SYMLINKS=()
-if [[ ${#POSITIONAL_ARGS[@]} -gt 0 ]]; then
+
+if [[ "$MODE" == "prompts" ]]; then
+  # Prompts mode: each .md file or directory becomes an item
   AGENTS=()
-  for arg in "${POSITIONAL_ARGS[@]}"; do
-    arg="${arg%/}"
-    resolved=""
-    if [[ -d "$REPO_ROOT/$arg" ]]; then
-      resolved="$REPO_ROOT/$arg"
-    elif [[ -d "$arg" ]]; then
-      resolved="$(cd "$arg" && pwd)"
-    elif [[ -d "$AGENTS_DIR/$arg" ]]; then
-      resolved="$AGENTS_DIR/$arg"
-    else
-      echo "$(red "Agent not found: $arg")"; exit 1
-    fi
-    name="$(basename "$resolved")"
-    AGENTS+=("$name")
-    AGENT_DIRS[$name]="$resolved"
-  done
+  if [[ ${#POSITIONAL_ARGS[@]} -gt 0 ]]; then
+    for arg in "${POSITIONAL_ARGS[@]}"; do
+      arg="${arg%/}"
+      if [[ -f "$arg" ]]; then
+        # Single file → wrap in a temp dir named after the file
+        name="$(basename "$arg" .md)"
+        tmpitem="$TMPDIR_RUN/items/$name"
+        mkdir -p "$tmpitem"
+        cp "$arg" "$tmpitem/"
+        AGENTS+=("$name")
+        AGENT_DIRS[$name]="$tmpitem"
+      elif [[ -d "$arg" ]]; then
+        name="$(basename "$arg")"
+        resolved="$(cd "$arg" && pwd)"
+        AGENTS+=("$name")
+        AGENT_DIRS[$name]="$resolved"
+      fi
+    done
+  fi
+elif [[ "$MODE" == "skills" ]]; then
+  # Skills mode: each subdirectory with SKILL.md is a skill
+  AGENTS=()
+  if [[ ${#POSITIONAL_ARGS[@]} -gt 0 ]]; then
+    for arg in "${POSITIONAL_ARGS[@]}"; do
+      arg="${arg%/}"
+      resolved=""
+      if [[ -d "$arg" ]]; then
+        resolved="$(cd "$arg" && pwd)"
+      elif [[ -n "$AGENTS_DIR" && -d "$AGENTS_DIR/$arg" ]]; then
+        resolved="$AGENTS_DIR/$arg"
+      fi
+      if [[ -n "$resolved" ]]; then
+        # Is this a single skill dir or parent of skills?
+        if [[ -f "$resolved/SKILL.md" ]]; then
+          name="$(basename "$resolved")"
+          AGENTS+=("$name")
+          AGENT_DIRS[$name]="$resolved"
+        else
+          # Parent dir — discover skill children
+          for d in "$resolved"/*/; do
+            [[ -d "$d" ]] || continue
+            name="$(basename "$d")"
+            AGENTS+=("$name")
+            AGENT_DIRS[$name]="${d%/}"
+          done
+        fi
+      fi
+    done
+  elif [[ -n "$AGENTS_DIR" && -d "$AGENTS_DIR" ]]; then
+    for d in "$AGENTS_DIR"/*/; do
+      [[ -d "$d" ]] || continue
+      name="$(basename "$d")"
+      AGENTS+=("$name")
+      AGENT_DIRS[$name]="${d%/}"
+    done
+  fi
 else
-  AGENTS=()
-  for d in "$AGENTS_DIR"/*/; do
-    [[ -d "$d" ]] || continue
-    name="$(basename "$d")"
-    [[ "$name" == "template" || "$name" == "nick-template" ]] && continue
-    AGENTS+=("$name")
-    AGENT_DIRS[$name]="${d%/}"
-  done
-  # Broken symlinks don't match */ — scan separately with -L (true for any symlink) and ! -e (true when target missing)
-  for entry in "$AGENTS_DIR"/*; do
-    [[ -L "$entry" && ! -e "$entry" ]] || continue
-    name="$(basename "$entry")"
-    BROKEN_SYMLINKS+=("$name → $(readlink "$entry" 2>/dev/null || echo '?')")
-  done
+  # Agents mode (legacy): discover agent directories
+  if [[ -z "$AGENTS_DIR" ]]; then
+    # Try to find agents dir
+    for try_dir in "$REPO_ROOT/src/agents" "$REPO_ROOT/agents"; do
+      [[ -d "$try_dir" ]] && { AGENTS_DIR="$try_dir"; break; }
+    done
+  fi
+  [[ -z "$SHARED_DIR" ]] && [[ -d "$REPO_ROOT/src/shared" ]] && SHARED_DIR="$REPO_ROOT/src/shared"
+
+  if [[ ${#POSITIONAL_ARGS[@]} -gt 0 ]]; then
+    AGENTS=()
+    for arg in "${POSITIONAL_ARGS[@]}"; do
+      arg="${arg%/}"
+      resolved=""
+      if [[ -d "$REPO_ROOT/$arg" ]]; then
+        resolved="$REPO_ROOT/$arg"
+      elif [[ -d "$arg" ]]; then
+        resolved="$(cd "$arg" && pwd)"
+      elif [[ -n "$AGENTS_DIR" && -d "$AGENTS_DIR/$arg" ]]; then
+        resolved="$AGENTS_DIR/$arg"
+      else
+        echo "$(red "Item not found: $arg")"; exit 1
+      fi
+      name="$(basename "$resolved")"
+      AGENTS+=("$name")
+      AGENT_DIRS[$name]="$resolved"
+    done
+  else
+    AGENTS=()
+    if [[ -n "$AGENTS_DIR" && -d "$AGENTS_DIR" ]]; then
+      for d in "$AGENTS_DIR"/*/; do
+        [[ -d "$d" ]] || continue
+        name="$(basename "$d")"
+        [[ "$name" == "template" || "$name" == "nick-template" ]] && continue
+        AGENTS+=("$name")
+        AGENT_DIRS[$name]="${d%/}"
+      done
+    fi
+    for entry in "${AGENTS_DIR:-/nonexistent}"/*; do
+      [[ -L "$entry" && ! -e "$entry" ]] || continue
+      name="$(basename "$entry")"
+      BROKEN_SYMLINKS+=("$name → $(readlink "$entry" 2>/dev/null || echo '?')")
+    done
+  fi
 fi
 
 if [[ ${#AGENTS[@]} -eq 0 ]]; then
-  echo "$(red "No agents found in $AGENTS_DIR")"; exit 1
+  echo "$(red "No items found to lint")"; exit 1
 fi
 
 # Warn about broken symlinks
@@ -251,12 +403,20 @@ if [[ ${#BROKEN_SYMLINKS[@]} -gt 0 ]]; then
   echo ""
 fi
 
-log "Agents: ${AGENTS[*]}"
+log "Items: ${AGENTS[*]}"
 
-# Standard agent definition files — only these are linted by PromptLint and Hardener.
-# Production workspaces may contain extra .md files (research docs, reports, memory logs)
-# that are NOT agent definitions and would distort quality/security scores.
-STANDARD_MD_FILES=(AGENTS.md SOUL.md IDENTITY.md USER.md TOOLS.md HEARTBEAT.md MEMORY.md BOOT.md)
+# Standard files per mode — only these are linted by PromptLint and Hardener
+if [[ "$MODE" == "skills" ]]; then
+  STANDARD_MD_FILES=(SKILL.md)
+  # In skills mode, also discover other .md files per skill
+  DISCOVER_ALL_MD=true
+elif [[ "$MODE" == "prompts" ]]; then
+  STANDARD_MD_FILES=()
+  DISCOVER_ALL_MD=true
+else
+  STANDARD_MD_FILES=(AGENTS.md SOUL.md IDENTITY.md USER.md TOOLS.md HEARTBEAT.md MEMORY.md BOOT.md)
+  DISCOVER_ALL_MD=false
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Run Tools 1, 2, 3 in parallel (Tool 4 needs user confirmation so runs after)
@@ -284,14 +444,25 @@ AL_PID=$!
     agent_dir="${AGENT_DIRS[$agent]}"
     [[ ! -d "$agent_dir" ]] && continue
     mkdir -p "$PL_DIR/$agent"
-    for fname in "${STANDARD_MD_FILES[@]}"; do
+
+    # Discover files to lint based on mode
+    if [[ "$DISCOVER_ALL_MD" == "true" ]]; then
+      md_files=()
+      for mdfile in "$agent_dir"/*.md; do
+        [[ -f "$mdfile" ]] || continue
+        md_files+=("$(basename "$mdfile")")
+      done
+    else
+      md_files=("${STANDARD_MD_FILES[@]}")
+    fi
+
+    for fname in "${md_files[@]}"; do
       mdfile="$agent_dir/$fname"
       [[ -f "$mdfile" ]] || continue
       outfile="$PL_DIR/$agent/$fname.json"
       if ! "$PROMPTLINT_BIN" score "$mdfile" --format json > "$outfile" 2>/dev/null; then
         echo '{"_error": true, "reason": "PromptLint binary failed"}' > "$outfile"
       fi
-      # Verify JSON is valid and non-empty
       if [[ ! -s "$outfile" ]] || ! $PY -c "import json; json.load(open('$outfile'))" 2>/dev/null; then
         echo '{"_error": true, "reason": "Invalid or empty JSON output"}' > "$outfile"
       fi
@@ -300,7 +471,7 @@ AL_PID=$!
 ) &
 PL_PID=$!
 
-# ─── Tool 3: Home-Grow Linter (background) ───────────────────────────────────
+# ─── Tool 3: Convention Checks (background) ──────────────────────────────────
 HG_AGENTS_DIR="$TMPDIR_RUN/hg_agents"
 mkdir -p "$HG_AGENTS_DIR"
 for _a in "${AGENTS[@]}"; do
@@ -308,7 +479,7 @@ for _a in "${AGENTS[@]}"; do
 done
 
 (
-  bash "$SCRIPT_DIR/apps/homegrow/run.sh" "$HG_AGENTS_DIR" "$SHARED_DIR" "${AGENTS[@]}" \
+  bash "$SCRIPT_DIR/apps/homegrow/run.sh" --mode "$MODE" "$HG_AGENTS_DIR" ${SHARED_DIR:+"$SHARED_DIR"} "${AGENTS[@]}" \
     > "$HG_DIR/results.txt" 2>/dev/null
 ) &
 HG_PID=$!
@@ -396,12 +567,21 @@ print('COST_TOTAL=%.6f' % ct_)
       [[ ! -d "$agent_dir" ]] && continue
 
       tmpraw="$TMPDIR_RUN/ph-raw-$agent-$$.md"
-      for _ph_fname in "${STANDARD_MD_FILES[@]}"; do
-        mdfile="$agent_dir/$_ph_fname"
-        [[ -f "$mdfile" ]] || continue
-        printf '\n\n--- %s ---\n' "$_ph_fname" >> "$tmpraw"
-        command cat "$mdfile" >> "$tmpraw"
-      done
+      if [[ "$DISCOVER_ALL_MD" == "true" ]]; then
+        # Skills/prompts: concat all .md files
+        for mdfile in "$agent_dir"/*.md; do
+          [[ -f "$mdfile" ]] || continue
+          printf '\n\n--- %s ---\n' "$(basename "$mdfile")" >> "$tmpraw"
+          command cat "$mdfile" >> "$tmpraw"
+        done
+      else
+        for _ph_fname in "${STANDARD_MD_FILES[@]}"; do
+          mdfile="$agent_dir/$_ph_fname"
+          [[ -f "$mdfile" ]] || continue
+          printf '\n\n--- %s ---\n' "$_ph_fname" >> "$tmpraw"
+          command cat "$mdfile" >> "$tmpraw"
+        done
+      fi
       [[ ! -s "$tmpraw" ]] && { command rm -f "$tmpraw"; continue; }
 
       tmpfile="$TMPDIR_RUN/ph-$agent-$$.json"
@@ -470,6 +650,8 @@ meta = {
     'timestamp': '$(date -u "+%Y-%m-%dT%H:%M:%SZ")',
     'agents_list': agents_list,
     'agent_dirs': agent_dirs,
+    'mode': '$MODE',
+    'shared_dir': '${SHARED_DIR:-}',
 }
 if '$HARDENER_RAN' == 'true':
     meta['hardener_model'] = '$HARDENER_MODEL'
@@ -478,7 +660,7 @@ with open(mf, 'w') as f:
 " 2>/dev/null
 
 # Run process.py (parses tools, scores, writes summary.json)
-PROC_ARGS=(--tmp-dir "$TMPDIR_RUN" --config "$CONF_FILE" --hardener-ran "$([ "$HARDENER_RAN" = "true" ] && echo true || echo false)")
+PROC_ARGS=(--tmp-dir "$TMPDIR_RUN" --config "$CONF_FILE" --hardener-ran "$([ "$HARDENER_RAN" = "true" ] && echo true || echo false)" --mode "$MODE")
 [[ -n "$THRESHOLD_FLAG" ]] && PROC_ARGS+=(--pass-threshold "$PASS_THRESHOLD")
 [[ "$BLOCKING_FLAG" = "false" ]] && PROC_ARGS+=(--no-blocking)
 $PY "$SCRIPT_DIR/lib/process.py" "${PROC_ARGS[@]}" 2>/dev/null || true

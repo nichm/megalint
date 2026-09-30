@@ -1,6 +1,7 @@
 /* ─── Consistency Rules (15%) ─── */
 
 import { Rule, Diagnostic } from "../types";
+import { getCoreFiles } from "./helpers";
 
 export const consistencyRules: Rule[] = [
   {
@@ -128,15 +129,9 @@ export const consistencyRules: Rule[] = [
       const seenInstructions = new Map<string, string>(); // normalized instruction → file
 
       // Only check core files for duplicates
-      const coreFiles = files.filter(
-        (f) =>
-          !f.name.startsWith("compound/") &&
-          !f.name.startsWith("memory/") &&
-          f.name.endsWith(".md")
-      );
+      const coreFiles = getCoreFiles(files);
 
       for (const file of coreFiles) {
-        if (!file.name.endsWith(".md")) continue;
 
         for (let i = 0; i < file.lines.length; i++) {
           const line = file.lines[i].trim();
@@ -372,9 +367,7 @@ export const consistencyRules: Rule[] = [
       const CJK_PATTERN = /[\u3000-\u9fff\uac00-\ud7af]/;
       const LATIN_PATTERN = /[a-zA-Z]{4,}/;
 
-      const coreFiles = files.filter(
-        (f) => !f.name.startsWith("compound/") && !f.name.startsWith("memory/") && f.name.endsWith(".md")
-      );
+      const coreFiles = getCoreFiles(files);
       for (const file of coreFiles) {
         let mixedCount = 0;
         for (let i = 0; i < file.lines.length; i++) {

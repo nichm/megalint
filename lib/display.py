@@ -66,11 +66,28 @@ def _section(title: str) -> None:
     print()
 
 
+_MODE_LABELS = {
+    "agents": "AI Agent Workspaces",
+    "skills": "AI Skills",
+    "prompts": "AI Prompts",
+}
+
+_ITEM_LABEL = {
+    "agents": "agent",
+    "skills": "skill",
+    "prompts": "prompt",
+}
+
+
 def _header(meta: dict) -> None:
+    mode = meta.get("mode", "agents")
+    mode_label = _MODE_LABELS.get(mode, "AI Prompts")
     print()
     print(bold("╔══════════════════════════════════════════════════════════════╗"))
     print()
-    print(bold("║         Unified Prompt Linter — OpenClaw MDS               ║"))
+    title = f"Megalint — {mode_label}"
+    pad = max(0, 57 - len(title))
+    print(bold(f"║  {title}{' ' * pad}║"))
     print()
     print(bold("╚══════════════════════════════════════════════════════════════╝"))
     print()
@@ -196,8 +213,9 @@ def _section_promptlint(data: dict, agents: list) -> None:
     print()
 
 
-def _section_homegrow(data: dict) -> None:
-    _section("Tool 3: Home-Grow Linter")
+def _section_homegrow(data: dict, mode: str = "agents") -> None:
+    label = "Conventions" if mode != "agents" else "Home-Grow Linter"
+    _section(f"Tool 3: {label}")
     hg = data.get("homegrow") or {}
     checks = hg.get("checks") or []
     passes = hg.get("passes", 0)
@@ -464,10 +482,11 @@ def display(summary_path: str, log_path: str | None = None) -> int:
     meta = data.get("meta") or {}
     agents = meta.get("agents_list") or []
 
+    mode = meta.get("mode", "agents")
     _header(meta)
     _section_agentlinter(data, agents)
     _section_promptlint(data, agents)
-    _section_homegrow(data)
+    _section_homegrow(data, mode)
     _section_budget(data, agents)
     _section_hardener(data, agents, meta)
     _section_combined(data, agents)

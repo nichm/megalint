@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# homegrow/run.sh — OpenClaw-specific consistency checks
+# homegrow/run.sh — Consistency & convention checks for AI prompts, skills, and agents.
 # Single source of truth. Called by megalint.sh or standalone.
 #
-# Usage: run.sh AGENTS_DIR SHARED_DIR [agent...]
+# Usage: run.sh [--mode agents|skills|prompts] ITEMS_DIR [SHARED_DIR] [item...]
 # Output: STATUS|context|message (one per line to stdout)
+#
+# Modes:
+#   agents  — OpenClaw MDS agent workspaces (default, legacy)
+#   skills  — Skill directories with SKILL.md files
+#   prompts — Individual .md prompt files
 #
 # All check logic lives here as individual functions.
 # megalint.sh only orchestrates, scores, and reports.
@@ -14,15 +19,23 @@ command -v rg >/dev/null 2>&1 || { echo "ERROR: ripgrep (rg) not installed — r
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ─── Parse mode flag ──────────────────────────────────────────────────────────
+
+MODE="agents"
+if [[ "${1:-}" == "--mode" ]]; then
+  MODE="$2"; shift 2
+fi
+
 # ─── Args ─────────────────────────────────────────────────────────────────────
 
-if [[ $# -lt 2 ]]; then
-  echo "Usage: run.sh AGENTS_DIR SHARED_DIR [agent...]" >&2
+if [[ $# -lt 1 ]]; then
+  echo "Usage: run.sh [--mode agents|skills|prompts] ITEMS_DIR [SHARED_DIR] [item...]" >&2
   exit 1
 fi
 
 AGENTS_DIR="$1"; shift
-SHARED_DIR="$1"; shift
+SHARED_DIR="${1:-}"
+[[ -n "$SHARED_DIR" && -d "$SHARED_DIR" ]] && shift || SHARED_DIR=""
 
 if [[ $# -gt 0 ]]; then
   AGENTS=("$@")
@@ -30,7 +43,7 @@ else
   AGENTS=()
   for d in "$AGENTS_DIR"/*/; do
     [[ -d "$d" ]] || continue
-    [[ "$(basename "$d")" == "template" ]] && continue
+    [[ "$(basename "$d")" == "template" || "$(basename "$d")" == "nick-template" ]] && continue
     AGENTS+=("$(basename "$d")")
   done
 fi
@@ -428,7 +441,6 @@ check_heartbeat() {
 # and per-file budgets via BUDGET_*_MD or env vars MEGALINT_BUDGET_*
 
 check_token_budgets() {
-  echo "DEBUG: check_token_budgets called" >&2
   # Max severity is WARN — Token Budget pillar handles graduated scoring.
   # Blocking ERRORs are reserved for structural issues, not length.
   local budgeted_files=(AGENTS.md SOUL.md IDENTITY.md USER.md TOOLS.md HEARTBEAT.md MEMORY.md)
@@ -441,7 +453,6 @@ check_token_budgets() {
       if [[ "$fname" == "AGENTS.md" || "$fname" == "MEMORY.md" || "$fname" == "TOOLS.md" || "$fname" == "BOOT.md" ]]; then
         tokens=$(estimate_tokens_with_imports "$f" "$SHARED_DIR")
         # Debug output
-        echo "DEBUG: $fname expanded tokens: $tokens" >&2
       else
         tokens=$(estimate_tokens "$f")
       fi
@@ -925,39 +936,49 @@ check_todo_file() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Run enabled checks
+# Run enabled checks — mode-dispatched
 # ═══════════════════════════════════════════════════════════════════════════════
 
-[[ "$CHECK_SHARED_FILES" == "1" ]]      && check_shared_files
-[[ "$CHECK_REQUIRED_FILES" == "1" ]]    && check_required_files
-[[ "$CHECK_BOOT_REFS" == "1" ]]         && check_boot_refs
-[[ "$CHECK_BOOT_STRUCTURE" == "1" ]]    && check_boot_structure
-[[ "$CHECK_ROSTER_COUNT" == "1" ]]      && check_roster_count
-[[ "$CHECK_BOOTSTRAP_CLEANUP" == "1" ]] && check_bootstrap_cleanup
-[[ "$CHECK_ANTI_SYCOPHANCY" == "1" ]]   && check_anti_sycophancy
-# check_action_tiers removed — superseded by check_action_tiers_strict
-[[ "$CHECK_TONE_TABLE" == "1" ]]        && check_tone_table
-[[ "$CHECK_CONTINUITY_LINE" == "1" ]]   && check_continuity_line
-[[ "$CHECK_SECURITY_SECTION" == "1" ]]  && check_security_section
-[[ "$CHECK_MEMORY_WORKFLOW" == "1" ]]   && check_memory_workflow
-[[ "$CHECK_HEARTBEAT" == "1" ]]         && check_heartbeat
-echo "DEBUG: About to check token budgets, CHECK_TOKEN_BUDGETS=$CHECK_TOKEN_BUDGETS" >&2
-[[ "$CHECK_TOKEN_BUDGETS" == "1" ]]     && check_token_budgets
-[[ "$CHECK_TIMEZONE" == "1" ]]          && check_timezone
-[[ "$CHECK_CANONICAL_WORDING" == "1" ]] && check_canonical_wording
-[[ "$CHECK_ACTION_TIERS_STRICT" == "1" ]]     && check_action_tiers_strict
-[[ "$CHECK_CONVENTIONS_RESOURCEFULNESS" == "1" ]] && check_conventions_resourcefulness
-[[ "$CHECK_BOOT_CONVENTIONS_REF" == "1" ]]     && check_boot_conventions_ref
-[[ "$CHECK_MEMORY_SURFACING" == "1" ]]         && check_memory_surfacing
-[[ "$CHECK_SOUL_TONE_CALIBRATED" == "1" ]]     && check_soul_tone_calibrated
-[[ "$CHECK_IMPORTS_SECTION" == "1" ]]          && check_imports_section
-[[ "$CHECK_IMPORTS_VALID_PATHS" == "1" ]]      && check_imports_valid_paths
-[[ "$CHECK_DIRECTIVES_EXIST" == "1" ]]         && check_directives_exist
-[[ "$CHECK_IMPORTS_COMPLETENESS" == "1" ]]     && check_imports_completeness
-[[ "$CHECK_IMPORTS_NO_DUPLICATION" == "1" ]]    && check_imports_no_duplication
-[[ "$CHECK_IMPORTS_BOOT_INTEGRATION" == "1" ]]  && check_imports_boot_integration
-[[ "$CHECK_IMPORTS_TOOLS_DEDUP" == "1" ]]       && check_imports_tools_dedup
-[[ "$CHECK_IMPORTS_USER_DEDUP" == "1" ]]        && check_imports_user_dedup
-[[ "$CHECK_LEGACY_SHARED_FILES" == "1" ]]       && check_legacy_shared_files
-[[ "$CHECK_ORPHAN_DIRECTIVES" == "1" ]]         && check_orphan_directives
-[[ "$CHECK_TODO_FILE" == "1" ]]                  && check_todo_file
+if [[ "$MODE" == "skills" ]]; then
+  # Skills mode: source and run skill-specific checks
+  # shellcheck source=skills.sh
+  source "$SCRIPT_DIR/skills.sh"
+elif [[ "$MODE" == "prompts" ]]; then
+  # Prompts mode: source skill checks for dangerous commands + injection,
+  # plus prompt-specific identity/format checks
+  # shellcheck source=prompts.sh
+  source "$SCRIPT_DIR/prompts.sh"
+else
+  # Agents mode (legacy OpenClaw): run all agent-specific checks
+  [[ "$CHECK_SHARED_FILES" == "1" ]]      && check_shared_files
+  [[ "$CHECK_REQUIRED_FILES" == "1" ]]    && check_required_files
+  [[ "$CHECK_BOOT_REFS" == "1" ]]         && check_boot_refs
+  [[ "$CHECK_BOOT_STRUCTURE" == "1" ]]    && check_boot_structure
+  [[ "$CHECK_ROSTER_COUNT" == "1" ]]      && check_roster_count
+  [[ "$CHECK_BOOTSTRAP_CLEANUP" == "1" ]] && check_bootstrap_cleanup
+  [[ "$CHECK_ANTI_SYCOPHANCY" == "1" ]]   && check_anti_sycophancy
+  [[ "$CHECK_TONE_TABLE" == "1" ]]        && check_tone_table
+  [[ "$CHECK_CONTINUITY_LINE" == "1" ]]   && check_continuity_line
+  [[ "$CHECK_SECURITY_SECTION" == "1" ]]  && check_security_section
+  [[ "$CHECK_MEMORY_WORKFLOW" == "1" ]]   && check_memory_workflow
+  [[ "$CHECK_HEARTBEAT" == "1" ]]         && check_heartbeat
+  [[ "$CHECK_TOKEN_BUDGETS" == "1" ]]     && check_token_budgets
+  [[ "$CHECK_TIMEZONE" == "1" ]]          && check_timezone
+  [[ "$CHECK_CANONICAL_WORDING" == "1" ]] && check_canonical_wording
+  [[ "$CHECK_ACTION_TIERS_STRICT" == "1" ]]     && check_action_tiers_strict
+  [[ "$CHECK_CONVENTIONS_RESOURCEFULNESS" == "1" ]] && check_conventions_resourcefulness
+  [[ "$CHECK_BOOT_CONVENTIONS_REF" == "1" ]]     && check_boot_conventions_ref
+  [[ "$CHECK_MEMORY_SURFACING" == "1" ]]         && check_memory_surfacing
+  [[ "$CHECK_SOUL_TONE_CALIBRATED" == "1" ]]     && check_soul_tone_calibrated
+  [[ "$CHECK_IMPORTS_SECTION" == "1" ]]          && check_imports_section
+  [[ "$CHECK_IMPORTS_VALID_PATHS" == "1" ]]      && check_imports_valid_paths
+  [[ "$CHECK_DIRECTIVES_EXIST" == "1" ]]         && check_directives_exist
+  [[ "$CHECK_IMPORTS_COMPLETENESS" == "1" ]]     && check_imports_completeness
+  [[ "$CHECK_IMPORTS_NO_DUPLICATION" == "1" ]]    && check_imports_no_duplication
+  [[ "$CHECK_IMPORTS_BOOT_INTEGRATION" == "1" ]]  && check_imports_boot_integration
+  [[ "$CHECK_IMPORTS_TOOLS_DEDUP" == "1" ]]       && check_imports_tools_dedup
+  [[ "$CHECK_IMPORTS_USER_DEDUP" == "1" ]]        && check_imports_user_dedup
+  [[ "$CHECK_LEGACY_SHARED_FILES" == "1" ]]       && check_legacy_shared_files
+  [[ "$CHECK_ORPHAN_DIRECTIVES" == "1" ]]         && check_orphan_directives
+  [[ "$CHECK_TODO_FILE" == "1" ]]                  && check_todo_file
+fi
