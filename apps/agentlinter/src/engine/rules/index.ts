@@ -30,19 +30,3 @@ export const allRules: Rule[] = [
   ...claudeCodeRules,
   ...remoteReadyRules,
 ];
-
-export {
-  structureRules,
-  clarityRules,
-  completenessRules,
-  securityRules,
-  consistencyRules,
-  memoryRules,
-  runtimeRules,
-  skillSafetyRules,
-  bestPracticesRules,
-  autofixRules,
-  integrationRules,
-  claudeCodeRules,
-  remoteReadyRules,
-};

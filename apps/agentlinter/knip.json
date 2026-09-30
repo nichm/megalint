@@ -9,6 +9,6 @@
     "src/engine/index.ts"
   ],
   "project": ["src/**/*.{ts,tsx}"],
-  "ignore": ["test-lint.ts", "packages/**"],
+  "ignore": ["packages/**"],
   "ignoreDependencies": ["tailwindcss"]
 }
