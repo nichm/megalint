@@ -75,6 +75,11 @@ THRESHOLD_FLAG=""
 BLOCKING_FLAG=""
 AGENTS_DIR_FLAG=""
 MODE_FLAG=""
+DISABLE_RULES_FLAG=""
+LIST_RULES_FLAG=false
+PRESET_FLAG=""
+QUIET_FLAG=false
+JSON_FLAG=false
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -94,6 +99,13 @@ while [[ $# -gt 0 ]]; do
     --agents-dir=*)        AGENTS_DIR_FLAG="${1#*=}"; shift ;;
     --mode)                MODE_FLAG="$2"; shift 2 ;;
     --mode=*)              MODE_FLAG="${1#*=}"; shift ;;
+    --disable-rule)        DISABLE_RULES_FLAG="$2"; shift 2 ;;
+    --disable-rule=*)      DISABLE_RULES_FLAG="${1#*=}"; shift ;;
+    --list-rules)          LIST_RULES_FLAG=true; shift ;;
+    --preset)              PRESET_FLAG="$2"; shift 2 ;;
+    --preset=*)            PRESET_FLAG="${1#*=}"; shift ;;
+    --quiet|-q)            QUIET_FLAG=true; shift ;;
+    --json)                JSON_FLAG=true; shift ;;
     --config|-c)           source "$2"; shift 2 ;;
     --config=*)            source "${1#*=}"; shift ;;
     *)                     POSITIONAL_ARGS+=("$1"); shift ;;
@@ -192,6 +204,13 @@ Options:
   -c, --config FILE          Load alternate config file
   -h, --help                 Show this help
 
+Rule Control:
+  --list-rules               List all rules for the current mode with IDs and exit
+  --disable-rule ID,...      Disable specific rules by ID (comma-separated)
+  --preset PRESET            Apply rule preset: strict, balanced, minimal
+  -q, --quiet                Only show errors and warnings (suppress OK/INFO)
+  --json                     Output results as JSON to stdout
+
 Auto-Detection:
   If the input path (or its children) contain SKILL.md → skills mode
   If the input path contains AGENTS.md + SOUL.md → agents mode
@@ -233,6 +252,12 @@ Examples:
   ./megalint.sh --format both --yes                       # JSON + Markdown reports
   ./megalint.sh --pass-threshold 85                       # Stricter pass bar
 
+  # Rule control
+  ./megalint.sh --mode skills --list-rules                # Show all skill rules
+  ./megalint.sh --mode skills --disable-rule skill/examples,skill/output-format
+  ./megalint.sh --mode skills --preset minimal            # Only ERROR-severity rules
+  ./megalint.sh --mode skills -q                          # Errors and warnings only
+
 Config: megalint.conf (weights, thresholds, grades)
 Rules:  apps/homegrow/rules.conf (budgets, tier multipliers, check toggles)
 Env:    .env (API keys — see .env.example)
@@ -241,7 +266,37 @@ HELP
   exit 0
 fi
 
-# ─── Dependency checks (after help, so --help works without deps) ─────────────
+# ─── --list-rules: delegate to homegrow and exit ─────────────────────────────
+
+if [[ "$LIST_RULES_FLAG" == "true" ]]; then
+  effective_mode="${MODE_FLAG:-auto}"
+  [[ "$effective_mode" == "auto" ]] && effective_mode="skills"
+  bash "$SCRIPT_DIR/apps/homegrow/run.sh" --mode "$effective_mode" --list-rules . 2>/dev/null || \
+    bash "$SCRIPT_DIR/apps/homegrow/run.sh" --mode "$effective_mode" --list-rules
+  exit 0
+fi
+
+# ─── --preset: resolve to disabled rules ──────────────────────────────────────
+
+if [[ -n "$PRESET_FLAG" ]]; then
+  case "$PRESET_FLAG" in
+    strict)
+      ;; # all rules enabled
+    balanced)
+      # Disable INFO-only advisory rules
+      DISABLE_RULES_FLAG="skill/scope-boundaries,skill/examples,skill/output-format,skill/error-handling,skill/restrictions,skill/tool-boundaries,prompt/identity,prompt/output-format,prompt/scope,prompt/examples,prompt/constraints"
+      ;;
+    minimal)
+      # Only ERROR-severity rules
+      DISABLE_RULES_FLAG="skill/description,skill/when-to-use,skill/structure,skill/actionable,skill/injection,skill/file-count,skill/scope-boundaries,skill/examples,skill/output-format,skill/error-handling,skill/restrictions,skill/tool-boundaries,skill/idempotent,prompt/identity,prompt/output-format,prompt/injection,prompt/scope,prompt/examples,prompt/constraints"
+      ;;
+    *)
+      echo "$(red "Unknown preset: $PRESET_FLAG (use strict, balanced, or minimal)")"; exit 1
+      ;;
+  esac
+fi
+
+# ─── Dependency checks (after help/list-rules, so those work without deps) ───
 
 command -v rg >/dev/null 2>&1 || { printf '\033[31m%s\033[0m\n' "ripgrep (rg) not found — install for convention checks"; exit 1; }
 
@@ -479,7 +534,9 @@ for _a in "${AGENTS[@]}"; do
 done
 
 (
-  bash "$SCRIPT_DIR/apps/homegrow/run.sh" --mode "$MODE" "$HG_AGENTS_DIR" ${SHARED_DIR:+"$SHARED_DIR"} "${AGENTS[@]}" \
+  bash "$SCRIPT_DIR/apps/homegrow/run.sh" --mode "$MODE" \
+    ${DISABLE_RULES_FLAG:+--disable-rule "$DISABLE_RULES_FLAG"} \
+    "$HG_AGENTS_DIR" ${SHARED_DIR:+"$SHARED_DIR"} "${AGENTS[@]}" \
     > "$HG_DIR/results.txt" 2>/dev/null
 ) &
 HG_PID=$!
@@ -651,6 +708,9 @@ meta = {
     'agents_list': agents_list,
     'agent_dirs': agent_dirs,
     'mode': '$MODE',
+    'disabled_rules': '${DISABLE_RULES_FLAG:-}',
+    'preset': '${PRESET_FLAG:-}',
+    'quiet': '$QUIET_FLAG' == 'true',
     'shared_dir': '${SHARED_DIR:-}',
 }
 if '$HARDENER_RAN' == 'true':

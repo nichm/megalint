@@ -213,7 +213,7 @@ def _section_promptlint(data: dict, agents: list) -> None:
     print()
 
 
-def _section_homegrow(data: dict, mode: str = "agents") -> None:
+def _section_homegrow(data: dict, mode: str = "agents", quiet: bool = False) -> None:
     label = "Conventions" if mode != "agents" else "Home-Grow Linter"
     _section(f"Tool 3: {label}")
     hg = data.get("homegrow") or {}
@@ -232,9 +232,11 @@ def _section_homegrow(data: dict, mode: str = "agents") -> None:
             msg = c.get("message", "")
             line = f"{ctx} — {msg}" if ctx else msg
             if status == "OK":
-                print(f"  {green('OK')}    {line}")
+                if not quiet:
+                    print(f"  {green('OK')}    {line}")
             elif status == "INFO":
-                print(f"  {cyan('INFO')}  {line}")
+                if not quiet:
+                    print(f"  {cyan('INFO')}  {line}")
             elif status == "WARN":
                 print(f"  {yellow('WARN')}  {line}")
             elif status == "ERROR":
@@ -242,6 +244,8 @@ def _section_homegrow(data: dict, mode: str = "agents") -> None:
 
     print()
     print(f"  {bold('Summary:')} {green(f'{passes} pass')} | {cyan(f'{infos} info')} | {yellow(f'{warnings} warn')} | {red(f'{errors} error')}")
+    if quiet and (passes + infos) > 0:
+        print(f"  {dim(f'({passes + infos} OK/INFO hidden by --quiet)')}")
     print()
     print()
 
@@ -483,10 +487,11 @@ def display(summary_path: str, log_path: str | None = None) -> int:
     agents = meta.get("agents_list") or []
 
     mode = meta.get("mode", "agents")
+    quiet = meta.get("quiet", False)
     _header(meta)
     _section_agentlinter(data, agents)
     _section_promptlint(data, agents)
-    _section_homegrow(data, mode)
+    _section_homegrow(data, mode, quiet=quiet)
     _section_budget(data, agents)
     _section_hardener(data, agents, meta)
     _section_combined(data, agents)

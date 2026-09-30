@@ -19,17 +19,65 @@ command -v rg >/dev/null 2>&1 || { echo "ERROR: ripgrep (rg) not installed — r
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ─── Parse mode flag ──────────────────────────────────────────────────────────
+# ─── Parse flags ──────────────────────────────────────────────────────────────
 
 MODE="agents"
-if [[ "${1:-}" == "--mode" ]]; then
-  MODE="$2"; shift 2
+DISABLED_RULES=""
+LIST_RULES=false
+
+while [[ "${1:-}" == --* ]]; do
+  case "$1" in
+    --mode)          MODE="$2"; shift 2 ;;
+    --disable-rule)  DISABLED_RULES="$2"; shift 2 ;;
+    --list-rules)    LIST_RULES=true; shift ;;
+    *)               break ;;
+  esac
+done
+
+# ─── List rules ──────────────────────────────────────────────────────────────
+
+if [[ "$LIST_RULES" == "true" ]]; then
+  if [[ "$MODE" == "skills" ]]; then
+    cat <<'RULES'
+skill/file-exists          ERROR   SKILL.md must exist in each skill directory
+skill/description          WARN    SKILL.md has a clear description/purpose statement
+skill/when-to-use          WARN    When-to-use / trigger guidance for agents
+skill/structure            WARN    Structured headings (≥2 sections)
+skill/dangerous-commands   ERROR   No rm -rf /, sudo rm, curl|sh, etc.
+skill/actionable           WARN    Steps, bullets, or code examples present
+skill/injection            WARN    No prompt injection patterns
+skill/file-count           INFO    Reasonable number of files per skill (≤5)
+skill/scope-boundaries     INFO    Defines what the skill should NOT do
+skill/examples             INFO    Concrete examples or code blocks present
+skill/output-format        INFO    Output format specification
+skill/error-handling       INFO    Error recovery / fallback instructions
+skill/secrets              ERROR   No hardcoded secrets, API keys, or PII
+skill/restrictions         INFO    Safety restrictions present (NEVER/MUST NOT markers)
+skill/tool-boundaries      INFO    Tool use boundaries (prefer X over Y)
+skill/idempotent           WARN    Destructive ops have safeguards (confirm/dry-run/backup)
+RULES
+  elif [[ "$MODE" == "prompts" ]]; then
+    cat <<'RULES'
+prompt/identity            INFO    Prompt has role/identity definition (You are...)
+prompt/output-format       INFO    Output format guidance present
+prompt/dangerous-commands  ERROR   No rm -rf /, sudo rm, curl|sh, etc.
+prompt/injection           WARN    No prompt injection patterns
+prompt/scope               INFO    Scope / task boundaries defined
+prompt/examples            INFO    Concrete examples present
+prompt/constraints         INFO    Emphatic constraints (NEVER/MUST NOT markers)
+RULES
+  else
+    cat <<'RULES'
+(agents mode: 31+ checks — see apps/homegrow/rules.conf for CHECK_* toggles)
+RULES
+  fi
+  exit 0
 fi
 
 # ─── Args ─────────────────────────────────────────────────────────────────────
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: run.sh [--mode agents|skills|prompts] ITEMS_DIR [SHARED_DIR] [item...]" >&2
+  echo "Usage: run.sh [--mode agents|skills|prompts] [--disable-rule id,...] [--list-rules] ITEMS_DIR [SHARED_DIR] [item...]" >&2
   exit 1
 fi
 
@@ -938,6 +986,8 @@ check_todo_file() {
 # ═══════════════════════════════════════════════════════════════════════════════
 # Run enabled checks — mode-dispatched
 # ═══════════════════════════════════════════════════════════════════════════════
+
+export DISABLED_RULES
 
 if [[ "$MODE" == "skills" ]]; then
   # Skills mode: source and run skill-specific checks
