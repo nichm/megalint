@@ -36,6 +36,12 @@ jobs:
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubicloud-standard-2
+    # Read-only cache, explicit: @claude runs are comment-triggered
+    # (issue_comment / review events), which GitHub already defaults
+    # to read-only cache since 2026-06-26 — saves from those runs
+    # silently no-op. Declaring it keeps every trigger type restore-
+    # only; this job never needs to maintain a cache.
+    cache-mode: read
     timeout-minutes: 30
     permissions:
       contents: write
