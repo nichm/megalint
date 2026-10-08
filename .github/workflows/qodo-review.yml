@@ -69,7 +69,7 @@ jobs:
     name: Code Suggestions (free models)
     steps:
       - name: Docker Cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /var/lib/docker
           key: qodo-docker-${{ runner.os }}
