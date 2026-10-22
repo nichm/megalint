@@ -12,6 +12,8 @@ updates:
       interval: "monthly"
       day: "monday"
       time: "05:00"
+    cooldown:
+      default-days: 5
     versioning-strategy: increase-if-necessary
     open-pull-requests-limit: 10
     rebase-strategy: "auto"
@@ -41,6 +43,8 @@ updates:
       interval: "monthly"
       day: "monday"
       time: "05:00"
+    cooldown:
+      default-days: 5
     versioning-strategy: increase-if-necessary
     open-pull-requests-limit: 10
     rebase-strategy: "auto"
@@ -70,6 +74,8 @@ updates:
       interval: "monthly"
       day: "monday"
       time: "05:00"
+    cooldown:
+      default-days: 5
     versioning-strategy: increase-if-necessary
     open-pull-requests-limit: 10
     rebase-strategy: "auto"
@@ -99,6 +105,8 @@ updates:
       interval: "monthly"
       day: "monday"
       time: "05:00"
+    cooldown:
+      default-days: 5
     versioning-strategy: increase-if-necessary
     open-pull-requests-limit: 10
     rebase-strategy: "auto"
@@ -128,6 +136,8 @@ updates:
       interval: "monthly"
       day: "monday"
       time: "05:00"
+    cooldown:
+      default-days: 5
     rebase-strategy: "auto"
     open-pull-requests-limit: 10
     groups:
