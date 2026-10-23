@@ -3,7 +3,12 @@
 # All config lives in webuildstuffio/pr-agent-settings/.pr_agent.toml (global)
 # and per-repo .pr_agent.toml (overrides). This workflow is intentionally minimal.
 #
-# Model: google/gemma-4-31b-it:free primary, 8-model :free fallback chain.
+# Model: repo-variable driven - QODO_MODEL + QODO_FALLBACK_1..3.
+# Fleet rollout 2026-10-23: Nemotron 3 Ultra 550B (free) primary;
+# fallbacks gemma-4-31b-it, gemma-4-26b-a4b-it, openrouter/free
+# (last resort). The value after || is the built-in default used
+# when the variable is unset; it matches the QODO_* repo variables.
+# retries 1, ai_timeout 90s per call.
 # API: direct OpenRouter (no AI Gateway proxy — CF gateway corrupts streaming).
 # DO NOT use openrouter/free as primary — proven broken (silent no-reviews).
 # NOTE: webuildstuffio/pr-agent-settings MUST stay PUBLIC — the default
@@ -92,21 +97,54 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Validate Qodo model variables
+        env:
+          QODO_MODEL: >-
+            ${{ vars.QODO_MODEL ||
+            'openrouter/nvidia/nemotron-3-ultra-550b-a55b:free' }}
+          QODO_FALLBACK_1: >-
+            ${{ vars.QODO_FALLBACK_1 ||
+            'openrouter/google/gemma-4-31b-it:free' }}
+          QODO_FALLBACK_2: >-
+            ${{ vars.QODO_FALLBACK_2 ||
+            'openrouter/google/gemma-4-26b-a4b-it:free' }}
+          QODO_FALLBACK_3: "${{ vars.QODO_FALLBACK_3 || 'openrouter/free' }}"
+        run: |
+          fail=0
+          check_var() {
+            name="$1"; value="$2"
+            case "$value" in
+              openrouter/*) ;;
+              *)
+                echo "::error::$name must start with openrouter/ (got: $value)"
+                fail=1 ;;
+            esac
+            case "$value" in
+              *[\"\,\[\]]* | *\\* | *[[:space:]]*)
+                echo "::error::$name has forbidden characters (got: $value)"
+                fail=1 ;;
+            esac
+          }
+          check_var QODO_MODEL "$QODO_MODEL"
+          check_var QODO_FALLBACK_1 "$QODO_FALLBACK_1"
+          check_var QODO_FALLBACK_2 "$QODO_FALLBACK_2"
+          check_var QODO_FALLBACK_3 "$QODO_FALLBACK_3"
+          exit "$fail"
+
       - name: Run Qodo /improve
-        uses: qodo-ai/pr-agent@v0.48.0
+        uses: qodo-ai/pr-agent@981344be2755e303df501e18e3f60b848a188a80 # v0.48.0
         env:
           OPENROUTER__KEY: ${{ secrets.QODO_OPENROUTER_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          config.model: "openrouter/google/gemma-4-31b-it:free"
+          config.model: >-
+            ${{ vars.QODO_MODEL ||
+            'openrouter/nvidia/nemotron-3-ultra-550b-a55b:free' }}
           config.fallback_models: >-
-            ["openrouter/qwen/qwen3.8-27b:free",
-            "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
-            "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
-            "openrouter/cohere/north-mini-code:free",
-            "openrouter/inclusionai/ling-3.0-flash-sante:free",
-            "openrouter/nvidia/nemotron-3.5-lightning:free",
-            "openrouter/poolside/laguna-s-2.1:free",
-            "openrouter/free"]
+            ["${{ vars.QODO_FALLBACK_1 || 'openrouter/google/gemma-4-31b-it:free' }}",
+            "${{ vars.QODO_FALLBACK_2 || 'openrouter/google/gemma-4-26b-a4b-it:free' }}",
+            "${{ vars.QODO_FALLBACK_3 || 'openrouter/free' }}"]
+          config.num_retries: "1"
+          config.ai_timeout: "90"
           CONFIG__CUSTOM_MODEL_MAX_TOKENS: "131072"
           github_action_config.auto_improve: "true"
           github_action_config.auto_review: "false"
